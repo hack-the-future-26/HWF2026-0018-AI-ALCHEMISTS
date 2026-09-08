@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+*.tsbuildinfo
+graphify-out/
+supabase/.temp/
+.DS_Store
+npm-debug.log*
