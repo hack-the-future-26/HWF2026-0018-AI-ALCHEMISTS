@@ -1,5 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnnouncementStrip } from "./components/layout/AnnouncementStrip";
 import { BottomTabBar } from "./components/layout/BottomTabBar";
 import { GithubSkillsPrompt } from "./components/layout/GithubSkillsPrompt";
 import { MobileDrawer } from "./components/layout/MobileDrawer";
@@ -7,6 +8,7 @@ import { ProfilePrompt } from "./components/layout/ProfilePrompt";
 import { RightPanel } from "./components/layout/RightPanel";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
+import { MessageToastStack, type MessageToastData } from "./components/ui/MessageToast";
 import { navigation } from "./constants/navigation";
 import { placeholderOwner } from "./lib/appStorage";
 import { fetchGithubImportData } from "./lib/github";
@@ -107,11 +109,23 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [composerDraft, setComposerDraft] = useState("");
+  const [messageToasts, setMessageToasts] = useState<MessageToastData[]>([]);
 
   const selectedConversationIdRef = useRef<string | null>(null);
+  const activeScreenRef = useRef<Screen>("home");
+  const conversationsRef = useRef<Conversation[]>([]);
+  const shownToastIds = useRef<Set<string>>(new Set());
+  const locallyReadIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId;
   }, [selectedConversationId]);
+  useEffect(() => {
+    activeScreenRef.current = activeScreen;
+  }, [activeScreen]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
@@ -125,7 +139,6 @@ function App() {
     }
   }, [themePreference]);
 
-  // Keep "System" live if the OS theme changes while the app is open.
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const query = window.matchMedia("(prefers-color-scheme: dark)");
@@ -134,7 +147,6 @@ function App() {
     return () => query.removeEventListener("change", handleChange);
   }, []);
 
-  // Track the Supabase auth session.
   useEffect(() => {
     if (!supabase) {
       setAuthPhase("signedOut");
@@ -147,7 +159,6 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Load (or clear) the PeerSpace profile whenever the session changes.
   useEffect(() => {
     if (!session) {
       setProfile(null);
@@ -171,10 +182,6 @@ function App() {
     setAuthPhase("loading");
     const currentSession = session;
 
-    // Fires once per GitHub sign-in: the GitHub access token only ever shows
-    // up on the session right after the OAuth redirect (Supabase doesn't
-    // persist it across reloads), so this is also how we detect "just signed
-    // in with GitHub" versus a normal restored session.
     function maybeImportGithubProfile(hadGithubUsername: boolean) {
       if (!currentSession.provider_token) return;
       if (currentSession.user.app_metadata?.provider !== "github") return;
@@ -204,10 +211,7 @@ function App() {
           setProfile(mapUserRowToPeer(refreshedRow, currentSession.user.email ?? undefined));
           if (addedSkills.length > 0) setGithubSkillsPrompt(addedSkills);
         })
-        .catch(() => {
-          // Best-effort import: a GitHub sign-in should still land the user
-          // in the app even if the GitHub API is unavailable or rate-limited.
-        });
+        .catch(() => {});
     }
 
     fetchProfile(session.user.id)
@@ -220,10 +224,6 @@ function App() {
           return;
         }
 
-        // No profile row yet - this is the first time this account has a
-        // confirmed session. Create a bare-bones profile so the person lands
-        // straight in the app instead of being blocked behind a mandatory
-        // onboarding form; they can fill in the rest from "My Profile".
         const metadata = session.user.user_metadata ?? {};
         const fallbackName =
           (metadata.full_name as string) ||
@@ -253,7 +253,6 @@ function App() {
     };
   }, [session]);
 
-  // Once the profile is ready, load the directory, conversations, and collaborations.
   useEffect(() => {
     if (authPhase !== "ready" || !profile) return;
     let cancelled = false;
@@ -297,12 +296,9 @@ function App() {
     return () => {
       cancelled = true;
     };
-    // Only re-run when the signed-in user changes, not on every profile edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
 
-  // Live campus feed posts via Supabase Realtime - new posts from any account
-  // (including your own, from another tab/device) stream in without a refresh.
   useEffect(() => {
     if (authPhase !== "ready" || !profile || !supabase) return;
     const client = supabase;
@@ -319,24 +315,28 @@ function App() {
     return () => {
       if (postsChannel) client.removeChannel(postsChannel);
     };
-    // Only re-subscribe when the signed-in user changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
 
-  // Live messages + new-conversation notifications via Supabase Realtime.
   useEffect(() => {
     if (authPhase !== "ready" || !profile || !supabase) return;
     const client = supabase;
     const userId = profile.id;
 
     const messageChannel = subscribeToMessages((message) => {
-      setConversations((prev) => {
-        const index = prev.findIndex((conversation) => conversation.id === message.conversationId);
-        if (index === -1) return prev;
-        if (prev[index].messages.some((existing) => existing.id === message.id)) return prev;
+      const isMine = message.senderId === userId;
+      const openConvId = selectedConversationIdRef.current;
+      const currentScreen = activeScreenRef.current;
+      const currentConversations = conversationsRef.current;
+      const toastId = `${message.id}-toast`;
+      const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
 
-        const isMine = message.senderId === userId;
-        const isOpen = selectedConversationIdRef.current === prev[index].id;
+      setConversations((prev) => {
+        const index = prev.findIndex((c) => c.id === message.conversationId);
+        if (index === -1) return prev;
+        if (prev[index].messages.some((m) => m.id === message.id)) return prev;
+
+        const isOpen = openConvId === prev[index].id;
         const next = [...prev];
         next[index] = {
           ...prev[index],
@@ -345,11 +345,31 @@ function App() {
         };
         return next;
       });
+
+      if (!isMine && isOpenAndVisible) {
+        locallyReadIds.current.add(message.conversationId);
+        markConversationRead(message.conversationId, userId).catch(() => {});
+      }
+
+      if (!isMine && !shownToastIds.current.has(toastId)) {
+        if (!isOpenAndVisible) {
+          const conv = currentConversations.find((c) => c.id === message.conversationId);
+          if (conv) {
+            shownToastIds.current.add(toastId);
+            setMessageToasts((toasts) => [...toasts, { id: toastId, sender: conv.peer, body: message.body }]);
+          }
+        }
+      }
     });
 
     const refreshConversations = () => {
       fetchConversations(userId)
-        .then(setConversations)
+        .then((fresh) => {
+          const merged = fresh.map((conv) =>
+            locallyReadIds.current.has(conv.id) ? { ...conv, unread: 0 } : conv
+          );
+          setConversations(merged);
+        })
         .catch(() => {});
     };
 
@@ -373,29 +393,26 @@ function App() {
       .subscribe();
 
     return () => {
-      // Use removeChannel (not just .unsubscribe()) so React StrictMode's
-      // dev-mode double-invoke of this effect can't leave a half-torn-down
-      // channel behind that silently stops delivering events.
       if (messageChannel) client.removeChannel(messageChannel);
       client.removeChannel(conversationChannelA);
       client.removeChannel(conversationChannelB);
     };
-    // Only re-subscribe when the signed-in user changes, not on every profile edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
 
-  // Mark the open conversation as read (locally and in Supabase).
   useEffect(() => {
     if (authPhase !== "ready" || !profile) return;
     if (activeScreen !== "messages" || !selectedConversationId) return;
-    const conversation = conversations.find((item) => item.id === selectedConversationId);
-    if (!conversation || conversation.unread === 0) return;
 
-    markConversationRead(selectedConversationId, profile.id).catch(() => {});
+    locallyReadIds.current.add(selectedConversationId);
+
     setConversations((prev) =>
       prev.map((item) => (item.id === selectedConversationId ? { ...item, unread: 0 } : item))
     );
-  }, [activeScreen, selectedConversationId, conversations, authPhase, profile]);
+
+    markConversationRead(selectedConversationId, profile.id).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScreen, selectedConversationId, authPhase, profile?.id]);
 
   const collaborations: Collaboration[] = useMemo(() => {
     if (!profile) return [];
@@ -539,6 +556,19 @@ function App() {
   function handleMessagePeer(peer: Peer) {
     void openConversationWith(peer);
   }
+
+  const handleDismissToast = useCallback((toastId: string) => {
+    setMessageToasts((prev) => prev.filter((t) => t.id !== toastId));
+  }, []);
+
+  const handleOpenToastConversation = useCallback((senderId: string) => {
+    setMessageToasts((prev) => prev.filter((t) => t.sender.id !== senderId));
+    const conversation = conversations.find((c) => c.peer.id === senderId);
+    if (conversation) {
+      setSelectedConversationId(conversation.id);
+      setActiveScreen("messages");
+    }
+  }, [conversations]);
 
   async function handleSendMessage(body: string) {
     const trimmed = body.trim();
@@ -732,6 +762,11 @@ function App() {
         onClose={() => setIsMobileMenuOpen(false)}
         onNavigate={setActiveScreen}
         onLogout={handleLogout}
+      />
+      <MessageToastStack
+        toasts={messageToasts}
+        onDismiss={handleDismissToast}
+        onOpen={handleOpenToastConversation}
       />
     </div>
   );
