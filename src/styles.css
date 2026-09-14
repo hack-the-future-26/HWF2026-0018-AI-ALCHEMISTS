@@ -1500,6 +1500,21 @@ blockquote {
   color: #dfe9e3;
 }
 
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.read-receipt {
+  color: #dfe9e3;
+}
+
+.read-receipt.read {
+  color: #63c5ff;
+}
+
 .message-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

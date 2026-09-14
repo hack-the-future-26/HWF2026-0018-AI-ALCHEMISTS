@@ -50,6 +50,7 @@ export type Message = {
   body: string;
   time: string;
   createdAt: string;
+  readAt: string | null;
 };
 
 export type Conversation = {
@@ -178,7 +179,8 @@ function mapMessageRow(row: any): Message {
     senderId: row.sender_id,
     body: row.body,
     time: formatClock(row.created_at),
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    readAt: row.read_at ?? null
   };
 }
 
@@ -392,10 +394,15 @@ export async function findOrCreateConversation(userId: string, peerId: string): 
 
 export async function sendMessageRow(conversationId: string, senderId: string, body: string) {
   const client = requireClient();
-  const { error } = await client
+  const { data, error } = await client
     .from("messages")
-    .insert({ conversation_id: conversationId, sender_id: senderId, body });
+    .insert({ conversation_id: conversationId, sender_id: senderId, body })
+    .select("*")
+    .single();
   if (error) throw error;
+  // Insert is also added locally by the caller. This makes sending reliable
+  // even when a browser's realtime channel reconnects slowly.
+  return mapMessageRow(data);
 }
 
 export async function markConversationRead(conversationId: string, userId: string) {
@@ -409,7 +416,10 @@ export async function markConversationRead(conversationId: string, userId: strin
 }
 
 export function subscribeToMessages(
-  onInsert: (message: Message & { conversationId: string }) => void
+  callbacks: {
+    onInsert: (message: Message & { conversationId: string }) => void;
+    onUpdate: (message: Message & { conversationId: string }) => void;
+  }
 ): RealtimeChannel | null {
   if (!supabase) return null;
   return supabase
@@ -419,7 +429,15 @@ export function subscribeToMessages(
       { event: "INSERT", schema: "public", table: "messages" },
       (payload) => {
         const row = payload.new as any;
-        onInsert({ ...mapMessageRow(row), conversationId: row.conversation_id });
+        callbacks.onInsert({ ...mapMessageRow(row), conversationId: row.conversation_id });
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages" },
+      (payload) => {
+        const row = payload.new as any;
+        callbacks.onUpdate({ ...mapMessageRow(row), conversationId: row.conversation_id });
       }
     )
     .subscribe();

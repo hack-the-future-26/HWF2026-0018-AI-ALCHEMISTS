@@ -109,11 +109,6 @@ function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [composerDraft, setComposerDraft] = useState("");
 
-  const selectedConversationIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    selectedConversationIdRef.current = selectedConversationId;
-  }, [selectedConversationId]);
-
   useEffect(() => {
     document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
   }, [isDarkMode]);
@@ -330,22 +325,39 @@ function App() {
     const client = supabase;
     const userId = profile.id;
 
-    const messageChannel = subscribeToMessages((message) => {
-      setConversations((prev) => {
-        const index = prev.findIndex((conversation) => conversation.id === message.conversationId);
-        if (index === -1) return prev;
-        if (prev[index].messages.some((existing) => existing.id === message.id)) return prev;
+    const messageChannel = subscribeToMessages({
+      onInsert: (message) => {
+        setConversations((prev) => {
+          const index = prev.findIndex((conversation) => conversation.id === message.conversationId);
+          if (index === -1) return prev;
+          if (prev[index].messages.some((existing) => existing.id === message.id)) return prev;
 
-        const isMine = message.senderId === userId;
-        const isOpen = selectedConversationIdRef.current === prev[index].id;
-        const next = [...prev];
-        next[index] = {
-          ...prev[index],
-          messages: [...prev[index].messages, message],
-          unread: !isMine && !isOpen ? prev[index].unread + 1 : prev[index].unread
-        };
-        return next;
-      });
+          const isMine = message.senderId === userId;
+          const next = [...prev];
+          next[index] = {
+            ...prev[index],
+            messages: [...prev[index].messages, message],
+            // Keep an incoming open-chat message unread until the effect below
+            // persists its read receipt. This also covers a just-created chat.
+            unread: !isMine ? prev[index].unread + 1 : prev[index].unread
+          };
+          return next;
+        });
+      },
+      onUpdate: (message) => {
+        setConversations((prev) =>
+          prev.map((conversation) =>
+            conversation.id !== message.conversationId
+              ? conversation
+              : {
+                  ...conversation,
+                  messages: conversation.messages.map((existing) =>
+                    existing.id === message.id ? message : existing
+                  )
+                }
+          )
+        );
+      }
     });
 
     const refreshConversations = () => {
@@ -390,7 +402,7 @@ function App() {
     if (authPhase !== "ready" || !profile) return;
     if (activeScreen !== "messages" || !selectedConversationId) return;
     const conversation = conversations.find((item) => item.id === selectedConversationId);
-    if (!conversation || conversation.unread === 0) return;
+    if (!conversation || !conversation.messages.some((message) => message.senderId !== profile.id && !message.readAt)) return;
 
     markConversationRead(selectedConversationId, profile.id).catch(() => {});
     setConversations((prev) =>
@@ -546,7 +558,15 @@ function App() {
     if (!trimmed || !profile || !selectedConversationId) return;
     setComposerDraft("");
     try {
-      await sendMessageRow(selectedConversationId, profile.id, trimmed);
+      const message = await sendMessageRow(selectedConversationId, profile.id, trimmed);
+      if (!message) return;
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id !== selectedConversationId || conversation.messages.some((item) => item.id === message.id)
+            ? conversation
+            : { ...conversation, messages: [...conversation.messages, message] }
+        )
+      );
     } catch {
       setComposerDraft(trimmed);
     }
