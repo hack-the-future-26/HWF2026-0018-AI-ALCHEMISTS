@@ -575,7 +575,15 @@ function App() {
     if (!trimmed || !profile || !selectedConversationId) return;
     setComposerDraft("");
     try {
-      await sendMessageRow(selectedConversationId, profile.id, trimmed);
+      const message = await sendMessageRow(selectedConversationId, profile.id, trimmed);
+      if (!message) return;
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id !== selectedConversationId || conversation.messages.some((item) => item.id === message.id)
+            ? conversation
+            : { ...conversation, messages: [...conversation.messages, message] }
+        )
+      );
     } catch {
       setComposerDraft(trimmed);
     }
