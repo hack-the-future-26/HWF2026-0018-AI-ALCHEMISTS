@@ -113,14 +113,8 @@ function App() {
 
   const selectedConversationIdRef = useRef<string | null>(null);
   const activeScreenRef = useRef<Screen>("home");
-  // Kept as a ref so realtime callbacks can read the latest conversations
-  // without needing them as effect dependencies.
   const conversationsRef = useRef<Conversation[]>([]);
-  // Tracks toast IDs that have already been queued to prevent duplicate toasts.
   const shownToastIds = useRef<Set<string>>(new Set());
-  // Tracks conversation IDs that have been locally marked as read but whose
-  // DB update (read_at) may not yet be committed. Used to prevent refreshConversations
-  // from restoring a stale unread count during the async race window.
   const locallyReadIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -145,7 +139,6 @@ function App() {
     }
   }, [themePreference]);
 
-  // Keep "System" live if the OS theme changes while the app is open.
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const query = window.matchMedia("(prefers-color-scheme: dark)");
@@ -154,7 +147,6 @@ function App() {
     return () => query.removeEventListener("change", handleChange);
   }, []);
 
-  // Track the Supabase auth session.
   useEffect(() => {
     if (!supabase) {
       setAuthPhase("signedOut");
@@ -167,7 +159,6 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Load (or clear) the PeerSpace profile whenever the session changes.
   useEffect(() => {
     if (!session) {
       setProfile(null);
@@ -191,10 +182,6 @@ function App() {
     setAuthPhase("loading");
     const currentSession = session;
 
-    // Fires once per GitHub sign-in: the GitHub access token only ever shows
-    // up on the session right after the OAuth redirect (Supabase doesn't
-    // persist it across reloads), so this is also how we detect "just signed
-    // in with GitHub" versus a normal restored session.
     function maybeImportGithubProfile(hadGithubUsername: boolean) {
       if (!currentSession.provider_token) return;
       if (currentSession.user.app_metadata?.provider !== "github") return;
@@ -224,10 +211,7 @@ function App() {
           setProfile(mapUserRowToPeer(refreshedRow, currentSession.user.email ?? undefined));
           if (addedSkills.length > 0) setGithubSkillsPrompt(addedSkills);
         })
-        .catch(() => {
-          // Best-effort import: a GitHub sign-in should still land the user
-          // in the app even if the GitHub API is unavailable or rate-limited.
-        });
+        .catch(() => {});
     }
 
     fetchProfile(session.user.id)
@@ -240,10 +224,6 @@ function App() {
           return;
         }
 
-        // No profile row yet - this is the first time this account has a
-        // confirmed session. Create a bare-bones profile so the person lands
-        // straight in the app instead of being blocked behind a mandatory
-        // onboarding form; they can fill in the rest from "My Profile".
         const metadata = session.user.user_metadata ?? {};
         const fallbackName =
           (metadata.full_name as string) ||
@@ -273,7 +253,6 @@ function App() {
     };
   }, [session]);
 
-  // Once the profile is ready, load the directory, conversations, and collaborations.
   useEffect(() => {
     if (authPhase !== "ready" || !profile) return;
     let cancelled = false;
@@ -317,12 +296,9 @@ function App() {
     return () => {
       cancelled = true;
     };
-    // Only re-run when the signed-in user changes, not on every profile edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
 
-  // Live campus feed posts via Supabase Realtime - new posts from any account
-  // (including your own, from another tab/device) stream in without a refresh.
   useEffect(() => {
     if (authPhase !== "ready" || !profile || !supabase) return;
     const client = supabase;
@@ -339,21 +315,15 @@ function App() {
     return () => {
       if (postsChannel) client.removeChannel(postsChannel);
     };
-    // Only re-subscribe when the signed-in user changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
 
-  // Live messages + new-conversation notifications via Supabase Realtime.
   useEffect(() => {
     if (authPhase !== "ready" || !profile || !supabase) return;
     const client = supabase;
     const userId = profile.id;
 
     const messageChannel = subscribeToMessages((message) => {
-      // Snapshot these synchronously BEFORE entering any state updater.
-      // State updater functions (passed to setState) can be invoked multiple
-      // times by React (StrictMode, Concurrent Mode), so side-effects like
-      // showing a toast must never live inside them.
       const isMine = message.senderId === userId;
       const openConvId = selectedConversationIdRef.current;
       const currentScreen = activeScreenRef.current;
@@ -361,11 +331,9 @@ function App() {
       const toastId = `${message.id}-toast`;
       const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
 
-      // Update conversation state (pure updater - no side effects).
       setConversations((prev) => {
         const index = prev.findIndex((c) => c.id === message.conversationId);
         if (index === -1) return prev;
-        // Deduplicate: skip messages already present in state.
         if (prev[index].messages.some((m) => m.id === message.id)) return prev;
 
         const isOpen = openConvId === prev[index].id;
@@ -373,22 +341,16 @@ function App() {
         next[index] = {
           ...prev[index],
           messages: [...prev[index].messages, message],
-          // Don't increment unread if the conversation is open and visible
           unread: !isMine && !isOpen ? prev[index].unread + 1 : prev[index].unread
         };
         return next;
       });
 
-      // If a message arrives for the currently-open conversation, immediately
-      // mark it read in Supabase so the next re-fetch doesn't restore an
-      // unread count. Also add to locallyReadIds for race protection.
       if (!isMine && isOpenAndVisible) {
         locallyReadIds.current.add(message.conversationId);
         markConversationRead(message.conversationId, userId).catch(() => {});
       }
 
-      // Show a toast OUTSIDE the updater, with a seen-ID guard to prevent
-      // duplicates even if the Supabase channel fires the event more than once.
       if (!isMine && !shownToastIds.current.has(toastId)) {
         if (!isOpenAndVisible) {
           const conv = currentConversations.find((c) => c.id === message.conversationId);
@@ -403,10 +365,6 @@ function App() {
     const refreshConversations = () => {
       fetchConversations(userId)
         .then((fresh) => {
-          // Merge: for any conversation we have already locally marked as read,
-          // force unread:0 regardless of what the DB returned. This prevents a
-          // race where the re-fetch arrives before Supabase has committed the
-          // read_at update, which would restore a stale unread count.
           const merged = fresh.map((conv) =>
             locallyReadIds.current.has(conv.id) ? { ...conv, unread: 0 } : conv
           );
@@ -435,35 +393,23 @@ function App() {
       .subscribe();
 
     return () => {
-      // Use removeChannel (not just .unsubscribe()) so React StrictMode's
-      // dev-mode double-invoke of this effect can't leave a half-torn-down
-      // channel behind that silently stops delivering events.
       if (messageChannel) client.removeChannel(messageChannel);
       client.removeChannel(conversationChannelA);
       client.removeChannel(conversationChannelB);
     };
-    // Only re-subscribe when the signed-in user changes, not on every profile edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
 
-  // Mark the open conversation as read (locally and in Supabase).
-  // Uses locallyReadIds ref to survive the refreshConversations race:
-  // once a conversation is added to locallyReadIds, subsequent re-fetches
-  // will not restore its unread count even if read_at hasn't committed yet.
   useEffect(() => {
     if (authPhase !== "ready" || !profile) return;
     if (activeScreen !== "messages" || !selectedConversationId) return;
 
-    // Record that this conversation has been read locally so refreshConversations
-    // can preserve the cleared state during any async DB race.
     locallyReadIds.current.add(selectedConversationId);
 
-    // Always clear unread in local state immediately.
     setConversations((prev) =>
       prev.map((item) => (item.id === selectedConversationId ? { ...item, unread: 0 } : item))
     );
 
-    // Persist to Supabase (best-effort; failure doesn't break local UI).
     markConversationRead(selectedConversationId, profile.id).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeScreen, selectedConversationId, authPhase, profile?.id]);
@@ -707,7 +653,6 @@ function App() {
           onSearchPeople={handleSearchPeople}
           onOpenMenu={() => setIsMobileMenuOpen(true)}
         />
-        <AnnouncementStrip />
         {showProfilePrompt && (
           <ProfilePrompt
             onCustomize={() => {
@@ -805,12 +750,9 @@ function App() {
             activeScreen={activeScreen}
             peers={peersDirectory}
             sessions={sessionRows}
-            collaborations={collaborations}
-            currentUserId={profile.id}
             onNavigate={setActiveScreen}
             onConnectPeer={handleMessagePeer}
             onOpenSessionConversation={handleOpenSessionConversation}
-            onApplyToCollaborate={handleApplyToCollaborate}
           />
         </div>
       </div>
