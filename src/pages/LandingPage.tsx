@@ -79,7 +79,7 @@ export function LandingPage() {
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "github",
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: `${window.location.origin}/login`,
         scopes: "read:user"
       }
     });

@@ -577,6 +577,10 @@ function App() {
   }
 
   if (authPhase === "signedOut") {
+    if (window.location.pathname !== "/login") {
+      window.location.replace("/landing.html");
+      return null;
+    }
     return <LandingPage />;
   }
 
