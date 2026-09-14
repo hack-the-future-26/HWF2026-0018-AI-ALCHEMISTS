@@ -1,5 +1,5 @@
 import type { Session } from "@supabase/supabase-js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnnouncementStrip } from "./components/layout/AnnouncementStrip";
 import { BottomTabBar } from "./components/layout/BottomTabBar";
 import { GithubSkillsPrompt } from "./components/layout/GithubSkillsPrompt";
@@ -8,6 +8,7 @@ import { ProfilePrompt } from "./components/layout/ProfilePrompt";
 import { RightPanel } from "./components/layout/RightPanel";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
+import { MessageToastStack, type MessageToastData } from "./components/ui/MessageToast";
 import { navigation } from "./constants/navigation";
 import { placeholderOwner } from "./lib/appStorage";
 import { fetchGithubImportData } from "./lib/github";
@@ -108,11 +109,29 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [composerDraft, setComposerDraft] = useState("");
+  const [messageToasts, setMessageToasts] = useState<MessageToastData[]>([]);
 
   const selectedConversationIdRef = useRef<string | null>(null);
+  const activeScreenRef = useRef<Screen>("home");
+  // Kept as a ref so realtime callbacks can read the latest conversations
+  // without needing them as effect dependencies.
+  const conversationsRef = useRef<Conversation[]>([]);
+  // Tracks toast IDs that have already been queued to prevent duplicate toasts.
+  const shownToastIds = useRef<Set<string>>(new Set());
+  // Tracks conversation IDs that have been locally marked as read but whose
+  // DB update (read_at) may not yet be committed. Used to prevent refreshConversations
+  // from restoring a stale unread count during the async race window.
+  const locallyReadIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId;
   }, [selectedConversationId]);
+  useEffect(() => {
+    activeScreenRef.current = activeScreen;
+  }, [activeScreen]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
@@ -331,26 +350,68 @@ function App() {
     const userId = profile.id;
 
     const messageChannel = subscribeToMessages((message) => {
-      setConversations((prev) => {
-        const index = prev.findIndex((conversation) => conversation.id === message.conversationId);
-        if (index === -1) return prev;
-        if (prev[index].messages.some((existing) => existing.id === message.id)) return prev;
+      // Snapshot these synchronously BEFORE entering any state updater.
+      // State updater functions (passed to setState) can be invoked multiple
+      // times by React (StrictMode, Concurrent Mode), so side-effects like
+      // showing a toast must never live inside them.
+      const isMine = message.senderId === userId;
+      const openConvId = selectedConversationIdRef.current;
+      const currentScreen = activeScreenRef.current;
+      const currentConversations = conversationsRef.current;
+      const toastId = `${message.id}-toast`;
+      const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
 
-        const isMine = message.senderId === userId;
-        const isOpen = selectedConversationIdRef.current === prev[index].id;
+      // Update conversation state (pure updater - no side effects).
+      setConversations((prev) => {
+        const index = prev.findIndex((c) => c.id === message.conversationId);
+        if (index === -1) return prev;
+        // Deduplicate: skip messages already present in state.
+        if (prev[index].messages.some((m) => m.id === message.id)) return prev;
+
+        const isOpen = openConvId === prev[index].id;
         const next = [...prev];
         next[index] = {
           ...prev[index],
           messages: [...prev[index].messages, message],
+          // Don't increment unread if the conversation is open and visible
           unread: !isMine && !isOpen ? prev[index].unread + 1 : prev[index].unread
         };
         return next;
       });
+
+      // If a message arrives for the currently-open conversation, immediately
+      // mark it read in Supabase so the next re-fetch doesn't restore an
+      // unread count. Also add to locallyReadIds for race protection.
+      if (!isMine && isOpenAndVisible) {
+        locallyReadIds.current.add(message.conversationId);
+        markConversationRead(message.conversationId, userId).catch(() => {});
+      }
+
+      // Show a toast OUTSIDE the updater, with a seen-ID guard to prevent
+      // duplicates even if the Supabase channel fires the event more than once.
+      if (!isMine && !shownToastIds.current.has(toastId)) {
+        if (!isOpenAndVisible) {
+          const conv = currentConversations.find((c) => c.id === message.conversationId);
+          if (conv) {
+            shownToastIds.current.add(toastId);
+            setMessageToasts((toasts) => [...toasts, { id: toastId, sender: conv.peer, body: message.body }]);
+          }
+        }
+      }
     });
 
     const refreshConversations = () => {
       fetchConversations(userId)
-        .then(setConversations)
+        .then((fresh) => {
+          // Merge: for any conversation we have already locally marked as read,
+          // force unread:0 regardless of what the DB returned. This prevents a
+          // race where the re-fetch arrives before Supabase has committed the
+          // read_at update, which would restore a stale unread count.
+          const merged = fresh.map((conv) =>
+            locallyReadIds.current.has(conv.id) ? { ...conv, unread: 0 } : conv
+          );
+          setConversations(merged);
+        })
         .catch(() => {});
     };
 
@@ -386,17 +447,26 @@ function App() {
   }, [authPhase, profile?.id]);
 
   // Mark the open conversation as read (locally and in Supabase).
+  // Uses locallyReadIds ref to survive the refreshConversations race:
+  // once a conversation is added to locallyReadIds, subsequent re-fetches
+  // will not restore its unread count even if read_at hasn't committed yet.
   useEffect(() => {
     if (authPhase !== "ready" || !profile) return;
     if (activeScreen !== "messages" || !selectedConversationId) return;
-    const conversation = conversations.find((item) => item.id === selectedConversationId);
-    if (!conversation || conversation.unread === 0) return;
 
-    markConversationRead(selectedConversationId, profile.id).catch(() => {});
+    // Record that this conversation has been read locally so refreshConversations
+    // can preserve the cleared state during any async DB race.
+    locallyReadIds.current.add(selectedConversationId);
+
+    // Always clear unread in local state immediately.
     setConversations((prev) =>
       prev.map((item) => (item.id === selectedConversationId ? { ...item, unread: 0 } : item))
     );
-  }, [activeScreen, selectedConversationId, conversations, authPhase, profile]);
+
+    // Persist to Supabase (best-effort; failure doesn't break local UI).
+    markConversationRead(selectedConversationId, profile.id).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScreen, selectedConversationId, authPhase, profile?.id]);
 
   const collaborations: Collaboration[] = useMemo(() => {
     if (!profile) return [];
@@ -540,6 +610,19 @@ function App() {
   function handleMessagePeer(peer: Peer) {
     void openConversationWith(peer);
   }
+
+  const handleDismissToast = useCallback((toastId: string) => {
+    setMessageToasts((prev) => prev.filter((t) => t.id !== toastId));
+  }, []);
+
+  const handleOpenToastConversation = useCallback((senderId: string) => {
+    setMessageToasts((prev) => prev.filter((t) => t.sender.id !== senderId));
+    const conversation = conversations.find((c) => c.peer.id === senderId);
+    if (conversation) {
+      setSelectedConversationId(conversation.id);
+      setActiveScreen("messages");
+    }
+  }, [conversations]);
 
   async function handleSendMessage(body: string) {
     const trimmed = body.trim();
@@ -737,6 +820,11 @@ function App() {
         onClose={() => setIsMobileMenuOpen(false)}
         onNavigate={setActiveScreen}
         onLogout={handleLogout}
+      />
+      <MessageToastStack
+        toasts={messageToasts}
+        onDismiss={handleDismissToast}
+        onOpen={handleOpenToastConversation}
       />
     </div>
   );
