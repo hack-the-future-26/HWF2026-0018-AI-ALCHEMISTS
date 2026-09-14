@@ -1,6 +1,5 @@
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnnouncementStrip } from "./components/layout/AnnouncementStrip";
 import { BottomTabBar } from "./components/layout/BottomTabBar";
 import { GithubSkillsPrompt } from "./components/layout/GithubSkillsPrompt";
 import { MobileDrawer } from "./components/layout/MobileDrawer";
@@ -624,7 +623,6 @@ function App() {
           onSearchPeople={handleSearchPeople}
           onOpenMenu={() => setIsMobileMenuOpen(true)}
         />
-        <AnnouncementStrip />
         {showProfilePrompt && (
           <ProfilePrompt
             onCustomize={() => {
@@ -722,12 +720,9 @@ function App() {
             activeScreen={activeScreen}
             peers={peersDirectory}
             sessions={sessionRows}
-            collaborations={collaborations}
-            currentUserId={profile.id}
             onNavigate={setActiveScreen}
             onConnectPeer={handleMessagePeer}
             onOpenSessionConversation={handleOpenSessionConversation}
-            onApplyToCollaborate={handleApplyToCollaborate}
           />
         </div>
       </div>
