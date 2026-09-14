@@ -1,5 +1,5 @@
 import { Checks, PaperPlaneTilt } from "@phosphor-icons/react";
-import { FormEvent } from "react";
+import { FormEvent, useEffect, useRef } from "react";
 import { Avatar } from "../components/ui/Avatar";
 import { PageIntro } from "../components/ui/PageIntro";
 import { VerifiedBadge } from "../components/ui/VerifiedBadge";
@@ -32,6 +32,15 @@ export function MessagesPage({
   const selectedConversation =
     conversations.find((conversation) => conversation.id === selectedConversationId) ??
     conversations[0];
+
+  const messageStreamRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = messageStreamRef.current;
+    if (node) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [selectedConversation?.id, selectedConversation?.messages.length]);
 
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,7 +100,7 @@ export function MessagesPage({
             </div>
             <VerifiedBadge />
           </header>
-          <div className="message-stream">
+          <div className="message-stream" ref={messageStreamRef}>
             {selectedConversation.messages.map((message) => (
               <article
                 className={message.senderId === currentUserId ? "bubble mine" : "bubble"}
