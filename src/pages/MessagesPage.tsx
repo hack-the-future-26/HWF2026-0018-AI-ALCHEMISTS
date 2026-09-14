@@ -96,7 +96,6 @@ export function MessagesPage({
             <Avatar peer={selectedConversation.peer} />
             <div>
               <strong>{selectedConversation.peer.name}</strong>
-              <span>{selectedConversation.peer.department}</span>
             </div>
             <VerifiedBadge />
           </header>
