@@ -1,6 +1,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { FormEvent, useState } from "react";
 import { fetchProfile, mapUserRowToPeer, type Peer, upsertProfile } from "../lib/peerspace";
+import { awardBadge } from "../lib/rewards";
 import { supabase } from "../lib/supabase";
 
 export function OnboardingPage({
@@ -30,6 +31,7 @@ export function OnboardingPage({
       const user = data.user;
       if (!user) throw new Error("Your session expired. Please log in again.");
       await upsertProfile(user.id, { fullName, college, major, academicYear, bio });
+      void awardBadge(user.id, "early_adopter");
       const row = await fetchProfile(user.id);
       onSaved(mapUserRowToPeer(row, user.email ?? email));
     } catch (err) {

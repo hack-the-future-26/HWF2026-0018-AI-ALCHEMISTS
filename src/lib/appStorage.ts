@@ -11,7 +11,12 @@ export function placeholderOwner(id: string): Peer {
     verified: false,
     bio: "",
     skills: [],
-    active: ""
+    active: "",
+    peerCoins: 0,
+    level: 1,
+    totalSessionsTaught: 0,
+    streakDays: 0,
+    createdAt: new Date().toISOString()
   };
 }
 
@@ -44,14 +49,6 @@ export function saveSetting(userId: string, key: string, value: string) {
     window.localStorage.setItem(`peerspace-${key}-${userId}`, value);
   } catch {
     // ignore storage errors (private browsing, etc.)
-  }
-}
-
-export function loadMessageNotificationsEnabled() {
-  try {
-    return window.localStorage.getItem("peerspace-message-notifications") !== "off";
-  } catch {
-    return true;
   }
 }
 

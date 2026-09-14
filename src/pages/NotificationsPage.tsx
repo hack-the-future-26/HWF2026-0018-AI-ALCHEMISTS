@@ -11,9 +11,6 @@ export function NotificationsPage({ notifications }: { notifications: Notificati
         body="Notifications are grouped by messages, sessions, collaborations, and profile views."
       />
       <section className="notification-list">
-        {notifications.length === 0 && (
-          <p className="profile-meta">You're all caught up — no notifications yet.</p>
-        )}
         {notifications.map((notification) => (
           <article
             className={
@@ -32,6 +29,15 @@ export function NotificationsPage({ notifications }: { notifications: Notificati
           </article>
         ))}
       </section>
+      {notifications.length <= 1 && (
+        <div className="empty-state">
+          <p className="empty-state-title">You&apos;re all caught up 👋</p>
+          <p className="empty-state-body">
+            New notifications appear when peers message you, review your sessions, or join your
+            collaborations.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

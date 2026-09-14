@@ -1,6 +1,7 @@
 import { MapPin } from "@phosphor-icons/react";
-import type { Peer } from "../../lib/peerspace";
+import { meaningfulBio, type Peer } from "../../lib/peerspace";
 import { Avatar } from "../ui/Avatar";
+import { GithubStatsCard } from "./GithubStatsCard";
 import { SectionHeader } from "../ui/SectionHeader";
 import { SkillTag } from "../ui/SkillTag";
 import { VerifiedBadge } from "../ui/VerifiedBadge";
@@ -39,7 +40,7 @@ export function StudentCard({
           </span>
         </div>
       </div>
-      <blockquote>{peer.bio}</blockquote>
+      {meaningfulBio(peer.bio) && <blockquote>{meaningfulBio(peer.bio)}</blockquote>}
       <div className="skill-columns">
         <div>
           <SectionHeader label={`Skills ${peer.name} offers`} compact />
@@ -58,6 +59,7 @@ export function StudentCard({
           </div>
         </div>
       </div>
+      {peer.github && <GithubStatsCard github={peer.github} />}
       <footer>
         <span>{peer.active}</span>
         <div>

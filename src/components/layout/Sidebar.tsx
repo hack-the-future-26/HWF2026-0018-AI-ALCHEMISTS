@@ -43,7 +43,6 @@ export function Sidebar({
             <item.icon size={18} />
             <span>{item.label}</span>
             {item.badge && <em>{item.badge}</em>}
-            {item.dot && <i aria-hidden="true" />}
           </button>
         ))}
       </nav>
@@ -54,8 +53,9 @@ export function Sidebar({
           <span>{profile.department}</span>
           <VerifiedBadge />
         </div>
-        <button className="logout-button" onClick={onLogout} aria-label="Log out">
+        <button className="logout-button" onClick={onLogout}>
           <SignOut size={18} />
+          Log out
         </button>
       </div>
     </aside>

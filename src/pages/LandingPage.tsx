@@ -1,3 +1,4 @@
+import { GithubLogo } from "@phosphor-icons/react";
 import { FormEvent, useState } from "react";
 import { supabase } from "../lib/supabase";
 
@@ -71,6 +72,23 @@ export function LandingPage() {
     }
   }
 
+  async function handleGithubSignIn() {
+    if (!supabase) return;
+    setStatus("pending");
+    setError("");
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: "github",
+      options: {
+        redirectTo: window.location.origin,
+        scopes: "read:user"
+      }
+    });
+    if (oauthError) {
+      setStatus("error");
+      setError(oauthError.message);
+    }
+  }
+
   return (
     <div className="landing-shell">
       <div className="landing-card card">
@@ -133,6 +151,22 @@ export function LandingPage() {
                   : "Create account"}
             </button>
           </form>
+        )}
+        {status !== "check-email" && (
+          <>
+            <div className="auth-divider">
+              <span>or</span>
+            </div>
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={status === "pending"}
+              onClick={handleGithubSignIn}
+            >
+              <GithubLogo size={18} weight="fill" />
+              Continue with GitHub
+            </button>
+          </>
         )}
         <button
           className="btn btn-secondary"

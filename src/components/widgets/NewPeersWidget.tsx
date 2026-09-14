@@ -22,7 +22,6 @@ export function NewPeersWidget({
               <Avatar peer={peer} />
               <div>
                 <strong>{peer.name}</strong>
-                <span>{peer.department}</span>
                 {peer.skills[0] && <SkillTag label={peer.skills[0].name} />}
               </div>
               <button className="btn btn-secondary" onClick={() => onConnect(peer)}>

@@ -8,9 +8,12 @@ export type Screen =
   | "sessions"
   | "notifications"
   | "profile"
+  | "rewards"
   | "settings";
 
 export type AuthPhase = "loading" | "signedOut" | "onboarding" | "ready";
+
+export type ThemePreference = "light" | "dark" | "system";
 
 export type Collaboration = {
   id: string;

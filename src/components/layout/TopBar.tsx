@@ -1,24 +1,28 @@
-import { MagnifyingGlass, MoonStars, Sun } from "@phosphor-icons/react";
+import { List, MagnifyingGlass, MoonStars, Sun } from "@phosphor-icons/react";
 import { useState } from "react";
-import { formatClockTime } from "../../lib/appStorage";
 
 export function TopBar({
   pageTitle,
+  peerCoins,
   isDarkMode,
   onToggleDarkMode,
-  now,
-  onSearchPeople
+  onSearchPeople,
+  onOpenMenu
 }: {
   pageTitle: string;
+  peerCoins: number;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
-  now: Date;
   onSearchPeople: (query: string) => void;
+  onOpenMenu: () => void;
 }) {
   const [query, setQuery] = useState("");
 
   return (
     <header className="topbar">
+      <button className="hamburger-button" onClick={onOpenMenu} aria-label="Open menu">
+        <List size={20} />
+      </button>
       <div className="breadcrumb">{pageTitle}</div>
       <form
         className="global-search"
@@ -34,16 +38,18 @@ export function TopBar({
           onChange={(event) => setQuery(event.target.value)}
         />
       </form>
-      <time className="clock" dateTime={now.toISOString()}>
-        {formatClockTime(now)}
-      </time>
-      <button
-        className="theme-toggle"
-        onClick={onToggleDarkMode}
-        aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
-      >
-        {isDarkMode ? <Sun size={18} /> : <MoonStars size={18} />}
-      </button>
+      <div className="topbar-actions">
+        <span className="topbar-coins" title="Your PeerCoins balance">
+          🪙 {peerCoins}
+        </span>
+        <button
+          className="theme-toggle"
+          onClick={onToggleDarkMode}
+          aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {isDarkMode ? <Sun size={18} /> : <MoonStars size={18} />}
+        </button>
+      </div>
     </header>
   );
 }

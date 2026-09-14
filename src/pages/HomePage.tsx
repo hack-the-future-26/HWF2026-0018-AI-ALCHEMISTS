@@ -1,36 +1,38 @@
 import { CaretDown, MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import { useState } from "react";
-import { CollabCard } from "../components/cards/CollabCard";
 import { FeedCard } from "../components/cards/FeedCard";
 import { PostComposer } from "../components/composers/PostComposer";
 import { SectionHeader } from "../components/ui/SectionHeader";
-import { feedTabs, stats } from "../constants/navigation";
+import { UpcomingSessionWidget } from "../components/widgets/UpcomingSessionWidget";
+import { feedTabs, postTimeFilters, stats } from "../constants/navigation";
 import { greetingForHour } from "../lib/appStorage";
-import type { Peer, PostRow } from "../lib/peerspace";
-import type { Collaboration, NewPostInput, Screen } from "../types/app";
+import type { Peer, PostRow, SessionRow } from "../lib/peerspace";
+import type { NewPostInput, Screen } from "../types/app";
 
 export function HomePage({
   profile,
   posts,
-  collaborations,
+  sessions,
   now,
   onNavigate,
   onCreatePost,
-  onApplyToCollaborate,
-  onRespondToPost
+  onRespondToPost,
+  onOpenSessionConversation
 }: {
   profile: Peer;
   posts: PostRow[];
-  collaborations: Collaboration[];
+  sessions: SessionRow[];
   now: Date;
   onNavigate: (screen: Screen) => void;
   onCreatePost: (input: NewPostInput) => void;
-  onApplyToCollaborate: (collab: Collaboration) => void;
   onRespondToPost: (post: PostRow) => void;
+  onOpenSessionConversation: (session: SessionRow) => void;
 }) {
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<(typeof feedTabs)[number]>("All Feed");
   const [feedQuery, setFeedQuery] = useState("");
+  const [activeTimeFilter, setActiveTimeFilter] =
+    useState<(typeof postTimeFilters)[number]>("All time");
 
   const normalizedFeedQuery = feedQuery.trim().toLowerCase();
   const visiblePosts = posts.filter((post) => {
@@ -42,11 +44,19 @@ export function HomePage({
       post.body.toLowerCase().includes(normalizedFeedQuery) ||
       post.tag.toLowerCase().includes(normalizedFeedQuery) ||
       post.skills.some((skill) => skill.toLowerCase().includes(normalizedFeedQuery));
-    return matchesTab && matchesQuery;
+    const matchesTime = isWithinTimeFilter(post.createdAt, activeTimeFilter, now);
+    return matchesTab && matchesQuery && matchesTime;
   });
 
   return (
     <div className="page-stack">
+      <div className="home-mobile-session">
+        <UpcomingSessionWidget
+          sessions={sessions}
+          onNavigate={onNavigate}
+          onOpenSessionConversation={onOpenSessionConversation}
+        />
+      </div>
       <section className="home-hero">
         <div>
           <h1>
@@ -58,7 +68,7 @@ export function HomePage({
           <label>
             <MagnifyingGlass size={16} />
             <input
-              placeholder="Search posts by skill or keyword"
+              placeholder="Search by skill or topic"
               value={feedQuery}
               onChange={(event) => setFeedQuery(event.target.value)}
             />
@@ -103,23 +113,41 @@ export function HomePage({
           onCancel={() => setIsComposerOpen(false)}
         />
       )}
-      <div className="tabs" role="tablist" aria-label="Campus feed filters">
-        {feedTabs.map((tab) => (
-          <button
-            className={tab === activeTab ? "tab active" : "tab"}
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+      <div className="section-row">
+        <div className="tabs" role="tablist" aria-label="Campus feed filters">
+          {feedTabs.map((tab) => (
+            <button
+              className={tab === activeTab ? "tab active" : "tab"}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+        <div className="select-button">
+          <select
+            aria-label="Filter posts by time"
+            value={activeTimeFilter}
+            onChange={(event) =>
+              setActiveTimeFilter(event.target.value as (typeof postTimeFilters)[number])
+            }
           >
-            {tab}
-          </button>
-        ))}
+            {postTimeFilters.map((filter) => (
+              <option key={filter} value={filter}>
+                {filter}
+              </option>
+            ))}
+          </select>
+          <CaretDown size={14} />
+        </div>
       </div>
       <section className="feed-list">
         {visiblePosts.length === 0 && posts.length === 0 && (
           <p className="profile-meta">No posts yet — be the first to share an update.</p>
         )}
         {visiblePosts.length === 0 && posts.length > 0 && (
-          <p className="profile-meta">No posts match "{feedQuery}" yet.</p>
+          <p className="profile-meta">No posts match these filters yet.</p>
         )}
         {visiblePosts.map((post) => (
           <FeedCard
@@ -130,22 +158,29 @@ export function HomePage({
           />
         ))}
       </section>
-
-      <SectionHeader label="Looking for teammates" />
-      <section className="collab-grid">
-        {collaborations.length === 0 && (
-          <p className="profile-meta">No open collaborations yet.</p>
-        )}
-        {collaborations.slice(0, 2).map((collab) => (
-          <CollabCard
-            key={collab.id}
-            collab={collab}
-            compact
-            currentUserId={profile.id}
-            onApply={onApplyToCollaborate}
-          />
-        ))}
-      </section>
     </div>
   );
+}
+
+function isWithinTimeFilter(
+  createdAt: string,
+  filter: (typeof postTimeFilters)[number],
+  now: Date
+) {
+  if (filter === "All time") return true;
+
+  const created = new Date(createdAt);
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  if (filter === "Today") {
+    return (
+      created.getFullYear() === now.getFullYear() &&
+      created.getMonth() === now.getMonth() &&
+      created.getDate() === now.getDate()
+    );
+  }
+
+  const elapsedMs = now.getTime() - created.getTime();
+  if (filter === "This week") return elapsedMs <= 7 * oneDayMs;
+  return elapsedMs <= 30 * oneDayMs;
 }

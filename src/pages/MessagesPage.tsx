@@ -5,6 +5,13 @@ import { PageIntro } from "../components/ui/PageIntro";
 import { VerifiedBadge } from "../components/ui/VerifiedBadge";
 import type { Conversation } from "../lib/peerspace";
 
+function shortenName(name: string): string {
+  if (name.length <= 18) return name;
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
 export function MessagesPage({
   currentUserId,
   conversations,
@@ -68,7 +75,7 @@ export function MessagesPage({
             >
               <Avatar peer={conversation.peer} />
               <span>
-                <strong>{conversation.peer.name}</strong>
+                <strong title={conversation.peer.name}>{shortenName(conversation.peer.name)}</strong>
                 <small>{conversation.messages.at(-1)?.body ?? "Start the conversation"}</small>
               </span>
               {conversation.unread > 0 && <em>{conversation.unread}</em>}

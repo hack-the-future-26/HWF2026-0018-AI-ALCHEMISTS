@@ -1,7 +1,19 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { ContributionWeek } from "./github";
 import { supabase } from "./supabase";
 
 export type SkillType = "knows" | "wants";
+
+export type GithubStats = {
+  username: string;
+  bio: string;
+  avatarUrl: string;
+  reposCount: number;
+  topLanguages: string[];
+  recentActivity: number;
+  contributionWeeks: ContributionWeek[];
+  totalContributions: number;
+};
 
 export type Peer = {
   id: string;
@@ -15,7 +27,22 @@ export type Peer = {
   skills: Array<{ name: string; type: SkillType }>;
   active: string;
   collegeEmail?: string;
+  github?: GithubStats;
+  peerCoins: number;
+  level: number;
+  totalSessionsTaught: number;
+  streakDays: number;
+  avatarUrl?: string;
+  createdAt: string;
 };
+
+// Some early accounts have a bio of "." left over from a placeholder form
+// value - treat that the same as empty rather than rendering a lone period.
+export function meaningfulBio(bio: string | undefined | null): string | null {
+  const trimmed = (bio ?? "").trim();
+  if (!trimmed || trimmed === ".") return null;
+  return trimmed;
+}
 
 export type Message = {
   id: string;
@@ -86,7 +113,25 @@ export function mapUserRowToPeer(row: any, collegeEmail?: string): Peer {
       .filter((entry: any) => entry.skills?.name)
       .map((entry: any) => ({ name: entry.skills.name as string, type: entry.type as SkillType })),
     active: "Verified PeerSpace member",
-    collegeEmail
+    collegeEmail,
+    github: row.github_username
+      ? {
+          username: row.github_username,
+          bio: row.github_bio ?? "",
+          avatarUrl: row.github_avatar_url ?? "",
+          reposCount: row.github_repos_count ?? 0,
+          topLanguages: row.github_top_languages ?? [],
+          recentActivity: row.github_recent_activity ?? 0,
+          contributionWeeks: row.github_contributions ?? [],
+          totalContributions: row.github_total_contributions ?? 0
+        }
+      : undefined,
+    peerCoins: row.peer_coins ?? 0,
+    level: row.level ?? 1,
+    totalSessionsTaught: row.total_sessions_taught ?? 0,
+    streakDays: row.streak_days ?? 0,
+    avatarUrl: row.avatar_url || undefined,
+    createdAt: row.created_at
   };
 }
 
@@ -101,8 +146,30 @@ function placeholderPeer(id: string): Peer {
     verified: false,
     bio: "",
     skills: [],
-    active: ""
+    active: "",
+    peerCoins: 0,
+    level: 1,
+    totalSessionsTaught: 0,
+    streakDays: 0,
+    createdAt: new Date().toISOString()
   };
+}
+
+export async function updateAvatarUrl(userId: string, avatarUrl: string) {
+  const client = requireClient();
+  const { error } = await client.from("users").update({ avatar_url: avatarUrl }).eq("id", userId);
+  if (error) throw error;
+}
+
+export async function uploadAvatarImage(userId: string, file: File): Promise<string> {
+  const client = requireClient();
+  const path = `${userId}.jpg`;
+  const { error: uploadError } = await client.storage
+    .from("avatars")
+    .upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
+  if (uploadError) throw uploadError;
+  const { data } = client.storage.from("avatars").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 function mapMessageRow(row: any): Message {
@@ -193,6 +260,57 @@ export async function syncSkills(userId: string, offered: string[], wanted: stri
     const { error: insertError } = await client.from("user_skills").insert(rows);
     if (insertError) throw insertError;
   }
+}
+
+export async function saveGithubProfileData(
+  userId: string,
+  data: {
+    username: string;
+    bio: string;
+    avatarUrl: string;
+    reposCount: number;
+    topLanguages: string[];
+    recentActivity: number;
+    contributionWeeks: ContributionWeek[];
+    totalContributions: number;
+  }
+) {
+  const client = requireClient();
+  const { error } = await client
+    .from("users")
+    .update({
+      github_username: data.username,
+      github_bio: data.bio,
+      github_avatar_url: data.avatarUrl,
+      github_repos_count: data.reposCount,
+      github_top_languages: data.topLanguages,
+      github_recent_activity: data.recentActivity,
+      github_contributions: data.contributionWeeks,
+      github_total_contributions: data.totalContributions
+    })
+    .eq("id", userId);
+  if (error) throw error;
+}
+
+// Adds GitHub-derived languages to the user's "offered" skills without
+// touching any skill they already added themselves - existing offered/wanted
+// skills are read first and only genuinely new names are appended.
+export async function mergeGithubOfferedSkills(userId: string, languages: string[]): Promise<string[]> {
+  const profileRow = await fetchProfile(userId);
+  const existingSkills = (profileRow?.user_skills ?? []) as Array<{ type: SkillType; skills?: { name: string } }>;
+  const offered = existingSkills
+    .filter((entry) => entry.type === "knows" && entry.skills?.name)
+    .map((entry) => entry.skills!.name);
+  const wanted = existingSkills
+    .filter((entry) => entry.type === "wants" && entry.skills?.name)
+    .map((entry) => entry.skills!.name);
+
+  const existingLower = new Set(offered.map((name) => name.toLowerCase()));
+  const newSkills = languages.filter((language) => !existingLower.has(language.toLowerCase()));
+  if (newSkills.length === 0) return [];
+
+  await syncSkills(userId, [...offered, ...newSkills], wanted);
+  return newSkills;
 }
 
 export async function fetchConversations(userId: string): Promise<Conversation[]> {
@@ -406,6 +524,21 @@ export async function fetchSessions(userId: string): Promise<SessionRow[]> {
       peer: peersById.get(peerId) ?? placeholderPeer(peerId)
     };
   });
+}
+
+export async function completeSessionRow(sessionId: string) {
+  const client = requireClient();
+  const { error } = await client.from("sessions").update({ status: "completed" }).eq("id", sessionId);
+  if (error) throw error;
+}
+
+export async function incrementSessionsTaught(userId: string, currentCount: number) {
+  const client = requireClient();
+  const { error } = await client
+    .from("users")
+    .update({ total_sessions_taught: currentCount + 1 })
+    .eq("id", userId);
+  if (error) throw error;
 }
 
 export type NotificationRow = {

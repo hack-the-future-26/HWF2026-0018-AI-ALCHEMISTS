@@ -38,7 +38,7 @@ export function FeedCard({
         <span className="tag">Your post</span>
       ) : (
         <button className="btn btn-secondary" onClick={() => onRespond(post)}>
-          {postCta[post.tag] ?? "Join discussion"}
+          {postCta[post.tag] ?? "Respond"}
         </button>
       )}
     </article>

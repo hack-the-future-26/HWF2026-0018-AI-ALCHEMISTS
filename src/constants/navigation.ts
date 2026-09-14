@@ -8,6 +8,7 @@ import {
   GearSix,
   House,
   MagnifyingGlass,
+  Trophy,
   UserCircle,
   UsersThree
 } from "@phosphor-icons/react";
@@ -19,7 +20,6 @@ export type NavItem = {
   label: string;
   icon: typeof House;
   badge?: string;
-  dot?: boolean;
 };
 
 export const stats = [
@@ -31,16 +31,19 @@ export const stats = [
 
 export const navigation: NavItem[] = [
   { id: "home", label: "Home", icon: House },
-  { id: "search", label: "Search & Matchmaking", icon: MagnifyingGlass },
+  { id: "search", label: "Find Peers", icon: MagnifyingGlass },
   { id: "collaborations", label: "Collaborations", icon: UsersThree },
   { id: "messages", label: "Messages", icon: ChatCircle },
   { id: "sessions", label: "Sessions", icon: CalendarCheck },
-  { id: "notifications", label: "Notifications", icon: Bell, dot: true },
+  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "profile", label: "My Profile", icon: UserCircle },
+  { id: "rewards", label: "Rewards", icon: Trophy },
   { id: "settings", label: "Settings", icon: GearSix }
 ];
 
 export const feedTabs = ["All Feed", "Teammates", "Peer Groups"] as const;
+
+export const postTimeFilters = ["All time", "Today", "This week", "This month"] as const;
 
 export const sessionStatusLabel: Record<SessionStatus, string> = {
   requested: "Requested",
@@ -57,5 +60,7 @@ export const notificationKindLabel: Record<NotificationRow["kind"], string> = {
 };
 
 export const postCta: Record<string, string> = {
+  "Study pod": "Join Session",
+  "Peer group": "Collaborate",
   "Teammate ask": "Respond"
 };

@@ -1,130 +1,121 @@
 import { useState } from "react";
 import { PageIntro } from "../components/ui/PageIntro";
-import { loadSetting, saveSetting } from "../lib/appStorage";
+import { SectionHeader } from "../components/ui/SectionHeader";
+import { VerifiedBadge } from "../components/ui/VerifiedBadge";
 import type { Peer } from "../lib/peerspace";
+import type { ThemePreference } from "../types/app";
+
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" }
+];
+
+function formatMemberSince(createdAt: string) {
+  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(
+    new Date(createdAt)
+  );
+}
 
 export function SettingsPage({
   profile,
-  peers,
-  messageNotificationsEnabled,
-  onToggleMessageNotifications
+  themePreference,
+  onSetThemePreference,
+  onLogout
 }: {
   profile: Peer;
-  peers: Peer[];
-  messageNotificationsEnabled: boolean;
-  onToggleMessageNotifications: (value: boolean) => void;
+  themePreference: ThemePreference;
+  onSetThemePreference: (value: ThemePreference) => void;
+  onLogout: () => void;
 }) {
-  const [visibility, setVisibility] = useState(() =>
-    loadSetting(profile.id, "visibility", "verified")
-  );
-  const [defaultDept, setDefaultDept] = useState(() =>
-    loadSetting(profile.id, "default-dept", "All")
-  );
-  const [editingRow, setEditingRow] = useState<string | null>(null);
-  const departments = ["All", ...new Set(peers.map((peer) => peer.department).filter(Boolean))];
-
-  function updateVisibility(value: string) {
-    setVisibility(value);
-    saveSetting(profile.id, "visibility", value);
-    setEditingRow(null);
-  }
-
-  function updateDefaultDept(value: string) {
-    setDefaultDept(value);
-    saveSetting(profile.id, "default-dept", value);
-    setEditingRow(null);
-  }
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [sessionReminders, setSessionReminders] = useState(true);
+  const [newMessageAlerts, setNewMessageAlerts] = useState(true);
 
   return (
     <div className="page-stack">
       <PageIntro
         title="Tune the way PeerSpace works for you."
-        body="Manage visibility, notifications, verified status, and matching preferences."
+        body="Appearance, notifications, and account details in one place."
       />
-      <section className="settings-list">
-        <article className="settings-row card">
-          <div>
-            <strong>Campus visibility</strong>
-            <p>
-              {visibility === "verified"
-                ? "Visible to verified students only."
-                : "Hidden from Search results."}
-            </p>
-          </div>
-          {editingRow === "visibility" ? (
-            <select
-              autoFocus
-              value={visibility}
-              onChange={(event) => updateVisibility(event.target.value)}
-              onBlur={() => setEditingRow(null)}
-            >
-              <option value="verified">Visible to verified students only</option>
-              <option value="hidden">Hidden from Search results</option>
-            </select>
-          ) : (
-            <button className="btn btn-secondary" onClick={() => setEditingRow("visibility")}>
-              Edit
-            </button>
-          )}
-        </article>
 
-        <article className="settings-row card">
-          <div>
-            <strong>Message notifications</strong>
-            <p>
-              {messageNotificationsEnabled
-                ? "Unread message badge is on."
-                : "Unread message badge is muted."}
-            </p>
+      <section className="card settings-section">
+        <SectionHeader label="Appearance" compact />
+        <div className="settings-row-inline">
+          <strong>Theme</strong>
+          <div className="segmented-control" role="radiogroup" aria-label="Theme">
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={themePreference === option.value}
+                className={themePreference === option.value ? "segment active" : "segment"}
+                onClick={() => onSetThemePreference(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
-          <button
-            className="btn btn-secondary"
-            onClick={() => onToggleMessageNotifications(!messageNotificationsEnabled)}
-          >
-            {messageNotificationsEnabled ? "Turn off" : "Turn on"}
-          </button>
-        </article>
+        </div>
+      </section>
 
-        <article className="settings-row card">
-          <div>
-            <strong>Verified profile</strong>
-            <p>
-              {profile.verified
-                ? "Verified via your college email."
-                : "Not verified yet — confirm your college email."}
-            </p>
-          </div>
-          <span className="tag">{profile.verified ? "Verified" : "Unverified"}</span>
-        </article>
+      <section className="card settings-section">
+        <SectionHeader label="Notifications" compact />
+        <label className="settings-toggle-row">
+          <span>Email notifications</span>
+          <input
+            type="checkbox"
+            checked={emailNotifications}
+            onChange={(event) => setEmailNotifications(event.target.checked)}
+          />
+        </label>
+        <label className="settings-toggle-row">
+          <span>Session reminders</span>
+          <input
+            type="checkbox"
+            checked={sessionReminders}
+            onChange={(event) => setSessionReminders(event.target.checked)}
+          />
+        </label>
+        <label className="settings-toggle-row">
+          <span>New message alerts</span>
+          <input
+            type="checkbox"
+            checked={newMessageAlerts}
+            onChange={(event) => setNewMessageAlerts(event.target.checked)}
+          />
+        </label>
+      </section>
 
-        <article className="settings-row card">
-          <div>
-            <strong>Default search department</strong>
-            <p>
-              {defaultDept === "All"
-                ? "Search shows every department by default."
-                : `Search defaults to ${defaultDept}.`}
-            </p>
-          </div>
-          {editingRow === "default-dept" ? (
-            <select
-              autoFocus
-              value={defaultDept}
-              onChange={(event) => updateDefaultDept(event.target.value)}
-              onBlur={() => setEditingRow(null)}
-            >
-              {departments.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept === "All" ? "All departments" : dept}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <button className="btn btn-secondary" onClick={() => setEditingRow("default-dept")}>
-              Edit
-            </button>
-          )}
-        </article>
+      <section className="card settings-section">
+        <SectionHeader label="Account" compact />
+        <div className="account-detail-row">
+          <span>Email</span>
+          <strong>{profile.collegeEmail || "—"}</strong>
+        </div>
+        <div className="account-detail-row">
+          <span>College</span>
+          <strong>{profile.building || "—"}</strong>
+        </div>
+        <div className="account-detail-row">
+          <span>Member since</span>
+          <strong>{formatMemberSince(profile.createdAt)}</strong>
+        </div>
+        <div className="account-detail-row">
+          <span>Verification status</span>
+          {profile.verified ? <VerifiedBadge /> : <span className="tag">Unverified</span>}
+        </div>
+        <button className="btn btn-secondary settings-logout" onClick={onLogout}>
+          Log out
+        </button>
+      </section>
+
+      <section className="card settings-section about-section">
+        <SectionHeader label="About" compact />
+        <p>PeerSpace v1.0.0-beta</p>
+        <p>Built with ❤️ for campus learning</p>
+        <p className="profile-meta">© 2026 PeerSpace</p>
       </section>
     </div>
   );

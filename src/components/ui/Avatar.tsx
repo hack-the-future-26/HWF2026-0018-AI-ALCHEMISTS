@@ -7,5 +7,10 @@ export function Avatar({
   peer: Peer;
   size?: "xs" | "sm" | "md" | "lg";
 }) {
-  return <span className={`avatar ${size}`}>{peer.initials}</span>;
+  const imageUrl = peer.avatarUrl || peer.github?.avatarUrl;
+  return (
+    <span className={`avatar ${size}`}>
+      {imageUrl ? <img src={imageUrl} alt="" className="avatar-image" /> : peer.initials}
+    </span>
+  );
 }

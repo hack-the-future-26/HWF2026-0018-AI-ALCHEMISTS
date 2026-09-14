@@ -3,13 +3,15 @@ import type { NewCollaborationInput } from "../../types/app";
 import { SectionHeader } from "../ui/SectionHeader";
 
 export function CollaborationComposer({
+  initialTitle = "",
   onSubmit,
   onCancel
 }: {
+  initialTitle?: string;
   onSubmit: (input: NewCollaborationInput) => void;
   onCancel: () => void;
 }) {
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState("");
   const [skills, setSkills] = useState("");
   const [meetingWindow, setMeetingWindow] = useState("");

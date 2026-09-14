@@ -24,6 +24,42 @@ const testUsers = [
     year: "Junior",
     knows: ["UI Design", "Figma"],
     wants: ["React"]
+  },
+  {
+    name: "aanya",
+    email: "test3@college.edu",
+    initials: "AA",
+    major: "Data Science",
+    year: "Senior",
+    knows: ["Python", "Machine Learning", "Statistics"],
+    wants: ["React"]
+  },
+  {
+    name: "kabir",
+    email: "test4@college.edu",
+    initials: "KA",
+    major: "Electrical Engineering",
+    year: "Sophomore",
+    knows: ["Circuits", "Arduino"],
+    wants: ["Node.js"]
+  },
+  {
+    name: "leah",
+    email: "test5@college.edu",
+    initials: "LE",
+    major: "Interaction Design",
+    year: "Junior",
+    knows: ["Figma", "User Research"],
+    wants: ["React"]
+  },
+  {
+    name: "dev",
+    email: "test6@college.edu",
+    initials: "DE",
+    major: "Mathematics",
+    year: "Senior",
+    knows: ["Algorithms", "Discrete Math"],
+    wants: ["Python"]
   }
 ];
 
@@ -54,7 +90,7 @@ await createNotifications(supabase, authUsers);
 await createPosts(supabase, authUsers);
 
 console.log(
-  `Seed complete. Login with test1@college.edu or test2@college.edu using password ${password}.`
+  `Seed complete. Login with any of ${testUsers.map((u) => u.email).join(", ")} using password ${password}.`
 );
 
 function createAdminClient(): Supabase {
@@ -179,20 +215,62 @@ async function createProfiles(client: Supabase, authUsers: Record<string, User>)
 async function createConversation(client: Supabase, authUsers: Record<string, User>) {
   const jude = authUsers["test1@college.edu"];
   const steev = authUsers["test2@college.edu"];
+  const aanya = authUsers["test3@college.edu"];
+  const kabir = authUsers["test4@college.edu"];
+  const leah = authUsers["test5@college.edu"];
+  const dev = authUsers["test6@college.edu"];
 
-  const { data, error } = await client
-    .from("conversations")
-    .insert({ created_by: jude.id, peer_a: jude.id, peer_b: steev.id })
-    .select()
-    .single();
-  if (error) throw error;
+  const threads = [
+    {
+      peerA: jude,
+      peerB: steev,
+      messages: [
+        { sender: jude, body: "Hey! Ready for the React API pairing session later?" },
+        { sender: steev, body: "Yep, see you at 5." }
+      ]
+    },
+    {
+      peerA: jude,
+      peerB: aanya,
+      messages: [
+        { sender: aanya, body: "Saw your ML study pod post - can I join?" },
+        { sender: jude, body: "Of course, Sundays at 3 PM." }
+      ]
+    },
+    {
+      peerA: steev,
+      peerB: leah,
+      messages: [
+        { sender: leah, body: "Want to swap Figma critique notes this week?" }
+      ]
+    },
+    {
+      peerA: kabir,
+      peerB: dev,
+      messages: [
+        { sender: kabir, body: "Could you help me sanity-check a discrete math proof?" },
+        { sender: dev, body: "Sure, send it over." }
+      ]
+    }
+  ];
 
-  const { error: messageError } = await client.from("messages").insert({
-    conversation_id: data.id,
-    sender_id: jude.id,
-    body: "Hey! Ready for the React API pairing session later?"
-  });
-  if (messageError) throw messageError;
+  for (const thread of threads) {
+    const { data, error } = await client
+      .from("conversations")
+      .insert({ created_by: thread.peerA.id, peer_a: thread.peerA.id, peer_b: thread.peerB.id })
+      .select()
+      .single();
+    if (error) throw error;
+
+    const { error: messageError } = await client.from("messages").insert(
+      thread.messages.map((message) => ({
+        conversation_id: data.id,
+        sender_id: message.sender.id,
+        body: message.body
+      }))
+    );
+    if (messageError) throw messageError;
+  }
 }
 
 async function createCollaborations(client: Supabase, authUsers: Record<string, User>) {
@@ -284,19 +362,83 @@ async function createNotifications(client: Supabase, authUsers: Record<string, U
 async function createPosts(client: Supabase, authUsers: Record<string, User>) {
   const jude = authUsers["test1@college.edu"];
   const steev = authUsers["test2@college.edu"];
+  const aanya = authUsers["test3@college.edu"];
+  const kabir = authUsers["test4@college.edu"];
+  const leah = authUsers["test5@college.edu"];
+  const dev = authUsers["test6@college.edu"];
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const daysAgo = (days: number) => hoursAgo(days * 24);
 
   const { error } = await client.from("posts").insert([
-    {
-      author_id: steev.id,
-      tag: "Peer group",
-      body: "Running a weekly Figma critique room Thursdays at 4 PM — bring a work-in-progress screen and get fast feedback.",
-      skills: ["Figma", "UI Design"]
-    },
     {
       author_id: jude.id,
       tag: "Teammate ask",
       body: "Building a study-pod matcher for the ML course project. Need someone comfortable with Postgres and a bit of React.",
-      skills: ["Postgres", "React"]
+      skills: ["Postgres", "React"],
+      created_at: hoursAgo(2)
+    },
+    {
+      author_id: steev.id,
+      tag: "Peer group",
+      body: "Running a weekly Figma critique room Thursdays at 4 PM — bring a work-in-progress screen and get fast feedback.",
+      skills: ["Figma", "UI Design"],
+      created_at: hoursAgo(6)
+    },
+    {
+      author_id: aanya.id,
+      tag: "Peer group",
+      body: "Hosting Python + pandas office hours today at 5 PM — bring your model questions.",
+      skills: ["Python", "Machine Learning"],
+      created_at: hoursAgo(0.5)
+    },
+    {
+      author_id: kabir.id,
+      tag: "Teammate ask",
+      body: "Prototyping a dorm energy monitor. Need someone comfortable with Node.js APIs and charts.",
+      skills: ["Arduino", "Node.js"],
+      created_at: daysAgo(2)
+    },
+    {
+      author_id: leah.id,
+      tag: "Peer group",
+      body: "Weekly UX critique room on Wednesdays — bring a screen and get fast feedback.",
+      skills: ["Figma", "User Research"],
+      created_at: daysAgo(4)
+    },
+    {
+      author_id: dev.id,
+      tag: "Peer group",
+      body: "Running proof-writing practice for discrete math — we work through three problems each session.",
+      skills: ["Discrete Math", "Algorithms"],
+      created_at: daysAgo(6)
+    },
+    {
+      author_id: aanya.id,
+      tag: "Teammate ask",
+      body: "Need a frontend partner to help visualize model evaluation metrics for the capstone.",
+      skills: ["React", "Machine Learning"],
+      created_at: daysAgo(12)
+    },
+    {
+      author_id: jude.id,
+      tag: "Peer group",
+      body: "Started a Node.js + Postgres crash course thread — drop questions here.",
+      skills: ["Node.js", "Postgres"],
+      created_at: daysAgo(20)
+    },
+    {
+      author_id: leah.id,
+      tag: "Teammate ask",
+      body: "Looking for a React dev to help wire up the campus accessibility map project.",
+      skills: ["React", "User Research"],
+      created_at: daysAgo(25)
+    },
+    {
+      author_id: steev.id,
+      tag: "Peer group",
+      body: "Recap from last term's onboarding jam — keeping this here for reference.",
+      skills: ["Figma"],
+      created_at: daysAgo(45)
     }
   ]);
   if (error) throw new Error(`Could not seed posts: ${error.message}`);

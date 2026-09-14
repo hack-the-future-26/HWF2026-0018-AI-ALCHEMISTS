@@ -1,12 +1,16 @@
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnnouncementStrip } from "./components/layout/AnnouncementStrip";
+import { BottomTabBar } from "./components/layout/BottomTabBar";
+import { GithubSkillsPrompt } from "./components/layout/GithubSkillsPrompt";
+import { MobileDrawer } from "./components/layout/MobileDrawer";
 import { ProfilePrompt } from "./components/layout/ProfilePrompt";
 import { RightPanel } from "./components/layout/RightPanel";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
 import { navigation } from "./constants/navigation";
-import { loadMessageNotificationsEnabled, placeholderOwner } from "./lib/appStorage";
+import { placeholderOwner } from "./lib/appStorage";
+import { fetchGithubImportData } from "./lib/github";
 import {
   type CollaborationRow,
   type Conversation,
@@ -14,6 +18,7 @@ import {
   type Peer,
   type PostRow,
   type SessionRow,
+  completeSessionRow,
   createCollaborationRow,
   createPostRow,
   fetchCollaborations,
@@ -24,14 +29,18 @@ import {
   fetchProfile,
   fetchSessions,
   findOrCreateConversation,
+  incrementSessionsTaught,
   mapUserRowToPeer,
   markConversationRead,
+  mergeGithubOfferedSkills,
+  saveGithubProfileData,
   sendMessageRow,
   subscribeToMessages,
   subscribeToPosts,
   upsertProfile,
   fetchPosts
 } from "./lib/peerspace";
+import { awardBadge, awardCoins } from "./lib/rewards";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
 import { CollaborationsPage } from "./pages/CollaborationsPage";
 import { HomePage } from "./pages/HomePage";
@@ -40,38 +49,46 @@ import { MessagesPage } from "./pages/MessagesPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { RewardsPage } from "./pages/RewardsPage";
 import { SearchPage } from "./pages/SearchPage";
 import { SessionsPage } from "./pages/SessionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import type { AuthPhase, Collaboration, NewCollaborationInput, NewPostInput, Screen } from "./types/app";
+import type {
+  AuthPhase,
+  Collaboration,
+  NewCollaborationInput,
+  NewPostInput,
+  Screen,
+  ThemePreference
+} from "./types/app";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [profile, setProfile] = useState<Peer | null>(null);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
+  const [githubSkillsPrompt, setGithubSkillsPrompt] = useState<string[] | null>(null);
+  const githubImportedRef = useRef<string | null>(null);
   const [openProfileInEditMode, setOpenProfileInEditMode] = useState(false);
-  const [messageNotificationsEnabled, setMessageNotificationsEnabled] = useState(
-    loadMessageNotificationsEnabled
-  );
-
-  function updateMessageNotificationsEnabled(value: boolean) {
-    setMessageNotificationsEnabled(value);
-    try {
-      window.localStorage.setItem("peerspace-message-notifications", value ? "on" : "off");
-    } catch {
-      // ignore storage errors (private browsing, etc.)
-    }
-  }
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [activeScreen, setActiveScreen] = useState<Screen>("home");
-  const [isDarkMode, setIsDarkMode] = useState(() => {
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
     try {
-      return window.localStorage.getItem("peerspace-theme") === "dark";
+      const stored = window.localStorage.getItem("peerspace-theme");
+      return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+    } catch {
+      return "system";
+    }
+  });
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() => {
+    try {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
     } catch {
       return false;
     }
   });
+  const isDarkMode = themePreference === "system" ? systemPrefersDark : themePreference === "dark";
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -99,12 +116,24 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
-    try {
-      window.localStorage.setItem("peerspace-theme", isDarkMode ? "dark" : "light");
-    } catch {
-      // storage can be unavailable (private browsing) - theme just won't persist
-    }
   }, [isDarkMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("peerspace-theme", themePreference);
+    } catch {
+      // storage can be unavailable (private browsing) - theme won't persist
+    }
+  }, [themePreference]);
+
+  // Keep "System" live if the OS theme changes while the app is open.
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
 
   // Track the Supabase auth session.
   useEffect(() => {
@@ -125,6 +154,8 @@ function App() {
       setProfile(null);
       setAuthPhase((prev) => (prev === "loading" ? "signedOut" : "signedOut"));
       setShowProfilePrompt(false);
+      setGithubSkillsPrompt(null);
+      githubImportedRef.current = null;
       setPosts([]);
       setCollaborationRows([]);
       setSessionRows([]);
@@ -139,6 +170,46 @@ function App() {
 
     let cancelled = false;
     setAuthPhase("loading");
+    const currentSession = session;
+
+    // Fires once per GitHub sign-in: the GitHub access token only ever shows
+    // up on the session right after the OAuth redirect (Supabase doesn't
+    // persist it across reloads), so this is also how we detect "just signed
+    // in with GitHub" versus a normal restored session.
+    function maybeImportGithubProfile(hadGithubUsername: boolean) {
+      if (!currentSession.provider_token) return;
+      if (currentSession.user.app_metadata?.provider !== "github") return;
+      if (githubImportedRef.current === currentSession.user.id) return;
+      githubImportedRef.current = currentSession.user.id;
+
+      fetchGithubImportData(currentSession.provider_token)
+        .then(async (data) => {
+          await saveGithubProfileData(currentSession.user.id, {
+            username: data.username,
+            bio: data.bio,
+            avatarUrl: data.avatarUrl,
+            reposCount: data.publicRepos,
+            topLanguages: data.topLanguages,
+            recentActivity: data.recentActivity,
+            contributionWeeks: data.contributionWeeks,
+            totalContributions: data.totalContributions
+          });
+          const addedSkills = await mergeGithubOfferedSkills(currentSession.user.id, data.topLanguages);
+          if (!hadGithubUsername) {
+            await awardCoins(currentSession.user.id, 20, "github_sync");
+            await awardBadge(currentSession.user.id, "github_pro");
+          }
+          if (cancelled) return;
+          const refreshedRow = await fetchProfile(currentSession.user.id);
+          if (cancelled || !refreshedRow) return;
+          setProfile(mapUserRowToPeer(refreshedRow, currentSession.user.email ?? undefined));
+          if (addedSkills.length > 0) setGithubSkillsPrompt(addedSkills);
+        })
+        .catch(() => {
+          // Best-effort import: a GitHub sign-in should still land the user
+          // in the app even if the GitHub API is unavailable or rate-limited.
+        });
+    }
 
     fetchProfile(session.user.id)
       .then(async (row) => {
@@ -146,6 +217,7 @@ function App() {
         if (row) {
           setProfile(mapUserRowToPeer(row, session.user.email ?? undefined));
           setAuthPhase("ready");
+          maybeImportGithubProfile(Boolean(row.github_username));
           return;
         }
 
@@ -155,7 +227,9 @@ function App() {
         // onboarding form; they can fill in the rest from "My Profile".
         const metadata = session.user.user_metadata ?? {};
         const fallbackName =
-          (metadata.full_name as string) || session.user.email?.split("@")[0] || "New member";
+          (metadata.full_name as string) ||
+          session.user.email?.split("@")[0] ||
+          "New member";
         await upsertProfile(session.user.id, {
           fullName: fallbackName,
           college: "",
@@ -163,11 +237,13 @@ function App() {
           academicYear: "",
           bio: ""
         });
+        void awardBadge(session.user.id, "early_adopter");
         const created = await fetchProfile(session.user.id);
         if (cancelled) return;
         setProfile(mapUserRowToPeer(created, session.user.email ?? undefined));
         setShowProfilePrompt(true);
         setAuthPhase("ready");
+        maybeImportGithubProfile(Boolean(created.github_username));
       })
       .catch(() => {
         if (!cancelled) setAuthPhase("onboarding");
@@ -337,15 +413,24 @@ function App() {
   }, [collaborationRows, profile, peersDirectory]);
 
   const totalUnread = conversations.reduce((sum, conversation) => sum + conversation.unread, 0);
-  const navItems = navigation.map((item) =>
-    item.id === "messages"
-      ? {
-          ...item,
-          badge:
-            messageNotificationsEnabled && totalUnread > 0 ? String(totalUnread) : undefined
-        }
-      : item
-  );
+  const unreadNotifications = notificationRows.filter(
+    (notification) => notification.status === "unread"
+  ).length;
+  const navItems = navigation.map((item) => {
+    if (item.id === "messages") {
+      return {
+        ...item,
+        badge: totalUnread > 0 ? String(totalUnread) : undefined
+      };
+    }
+    if (item.id === "notifications") {
+      return {
+        ...item,
+        badge: unreadNotifications > 0 ? String(unreadNotifications) : undefined
+      };
+    }
+    return item;
+  });
   const pageTitle = navigation.find((item) => item.id === activeScreen)?.label ?? "Home";
 
   async function handleLogout() {
@@ -363,6 +448,7 @@ function App() {
     try {
       const post = await createPostRow(profile.id, input);
       setPosts((prev) => (prev.some((existing) => existing.id === post.id) ? prev : [post, ...prev]));
+      void awardCoins(profile.id, 5, "post_created");
     } catch {
       // leave the composer open so the user can retry
     }
@@ -378,6 +464,28 @@ function App() {
       session.peer,
       `Hi ${session.peer.name}, following up on our "${session.topic}" session. `
     );
+  }
+
+  async function handleCompleteSession(session: SessionRow) {
+    if (!profile) return;
+    try {
+      await completeSessionRow(session.id);
+      setSessionRows((prev) =>
+        prev.map((row) => (row.id === session.id ? { ...row, status: "completed" } : row))
+      );
+
+      const previousSessionsTaught = profile.totalSessionsTaught;
+      await incrementSessionsTaught(profile.id, previousSessionsTaught);
+      await awardCoins(profile.id, 50, "session_completed");
+      if (previousSessionsTaught === 0) {
+        await awardBadge(profile.id, "first_session");
+      }
+
+      const refreshedRow = await fetchProfile(profile.id);
+      if (refreshedRow) setProfile(mapUserRowToPeer(refreshedRow, profile.collegeEmail));
+    } catch {
+      // leave the session status as-is so the user can retry
+    }
   }
 
   function handleInviteToCollaborate(peer: Peer) {
@@ -396,6 +504,9 @@ function App() {
     try {
       const row = await createCollaborationRow(profile.id, input);
       setCollaborationRows((prev) => [row, ...prev]);
+      void awardCoins(profile.id, 30, "collaboration_created");
+      const ownedCount = collaborationRows.filter((existing) => existing.ownerId === profile.id).length + 1;
+      if (ownedCount >= 3) void awardBadge(profile.id, "collaborator");
     } catch {
       // leave the composer open so the user can retry
     }
@@ -503,10 +614,11 @@ function App() {
       <div className="workspace">
         <TopBar
           pageTitle={pageTitle}
+          peerCoins={profile.peerCoins}
           isDarkMode={isDarkMode}
-          onToggleDarkMode={() => setIsDarkMode((value) => !value)}
-          now={now}
+          onToggleDarkMode={() => setThemePreference(isDarkMode ? "light" : "dark")}
           onSearchPeople={handleSearchPeople}
+          onOpenMenu={() => setIsMobileMenuOpen(true)}
         />
         <AnnouncementStrip />
         {showProfilePrompt && (
@@ -519,18 +631,29 @@ function App() {
             onDismiss={() => setShowProfilePrompt(false)}
           />
         )}
+        {githubSkillsPrompt && (
+          <GithubSkillsPrompt
+            skills={githubSkillsPrompt}
+            onAccept={() => setGithubSkillsPrompt(null)}
+            onEdit={() => {
+              setActiveScreen("profile");
+              setOpenProfileInEditMode(true);
+              setGithubSkillsPrompt(null);
+            }}
+          />
+        )}
         <div className="content-shell">
           <main className="center-column" id="main-content">
             {activeScreen === "home" && (
               <HomePage
                 profile={profile}
                 posts={posts}
-                collaborations={collaborations}
+                sessions={sessionRows}
                 now={now}
                 onNavigate={setActiveScreen}
                 onCreatePost={handleCreatePost}
-                onApplyToCollaborate={handleApplyToCollaborate}
                 onRespondToPost={handleRespondToPost}
+                onOpenSessionConversation={handleOpenSessionConversation}
               />
             )}
             {activeScreen === "search" && (
@@ -563,7 +686,12 @@ function App() {
               />
             )}
             {activeScreen === "sessions" && (
-              <SessionsPage sessions={sessionRows} onOpenConversation={handleOpenSessionConversation} />
+              <SessionsPage
+                sessions={sessionRows}
+                onOpenConversation={handleOpenSessionConversation}
+                onCompleteSession={handleCompleteSession}
+                onNavigate={setActiveScreen}
+              />
             )}
             {activeScreen === "notifications" && (
               <NotificationsPage notifications={notificationRows} />
@@ -576,12 +704,13 @@ function App() {
                 onEditModeConsumed={() => setOpenProfileInEditMode(false)}
               />
             )}
+            {activeScreen === "rewards" && <RewardsPage profile={profile} />}
             {activeScreen === "settings" && (
               <SettingsPage
                 profile={profile}
-                peers={peersDirectory}
-                messageNotificationsEnabled={messageNotificationsEnabled}
-                onToggleMessageNotifications={updateMessageNotificationsEnabled}
+                themePreference={themePreference}
+                onSetThemePreference={setThemePreference}
+                onLogout={handleLogout}
               />
             )}
           </main>
@@ -589,12 +718,22 @@ function App() {
             activeScreen={activeScreen}
             peers={peersDirectory}
             sessions={sessionRows}
+            collaborations={collaborations}
+            currentUserId={profile.id}
             onNavigate={setActiveScreen}
             onConnectPeer={handleMessagePeer}
             onOpenSessionConversation={handleOpenSessionConversation}
+            onApplyToCollaborate={handleApplyToCollaborate}
           />
         </div>
       </div>
+      <BottomTabBar activeScreen={activeScreen} unreadMessages={totalUnread} onNavigate={setActiveScreen} />
+      <MobileDrawer
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        onNavigate={setActiveScreen}
+        onLogout={handleLogout}
+      />
     </div>
   );
 }

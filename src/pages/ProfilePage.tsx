@@ -1,11 +1,23 @@
-import { FormEvent, useEffect, useState } from "react";
+import { Camera } from "@phosphor-icons/react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { GithubStatsCard } from "../components/cards/GithubStatsCard";
 import { Avatar } from "../components/ui/Avatar";
 import { PageIntro } from "../components/ui/PageIntro";
 import { SectionHeader } from "../components/ui/SectionHeader";
 import { SkillTag } from "../components/ui/SkillTag";
 import { VerifiedBadge } from "../components/ui/VerifiedBadge";
 import { loadRollNumber, saveRollNumber } from "../lib/appStorage";
-import { fetchProfile, mapUserRowToPeer, type Peer, syncSkills, upsertProfile } from "../lib/peerspace";
+import {
+  fetchProfile,
+  mapUserRowToPeer,
+  meaningfulBio,
+  type Peer,
+  syncSkills,
+  updateAvatarUrl,
+  uploadAvatarImage,
+  upsertProfile
+} from "../lib/peerspace";
+import { BADGE_DEFINITIONS, type BadgeType, fetchBadges, levelLabel } from "../lib/rewards";
 
 type ProfileFields = {
   name: string;
@@ -46,11 +58,28 @@ export function ProfilePage({
   const [rollDraft, setRollDraft] = useState(rollNumber);
   const [status, setStatus] = useState<"idle" | "pending" | "error">("idle");
   const [error, setError] = useState("");
+  const [earnedBadges, setEarnedBadges] = useState<BadgeType[]>([]);
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState(profile.avatarUrl ?? "");
+  const [avatarStatus, setAvatarStatus] = useState<"idle" | "uploading" | "error">("idle");
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchBadges(profile.id)
+      .then((badges) => {
+        if (!cancelled) setEarnedBadges(badges);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
 
   useEffect(() => {
     if (!startInEditMode) return;
     setDraft(toProfileFields(profile));
     setRollDraft(loadRollNumber(profile.id));
+    setAvatarUrlDraft(profile.avatarUrl ?? "");
     setIsEditing(true);
     onEditModeConsumed?.();
     // Only respond to the prop turning on; profile/rollDraft changes while
@@ -61,6 +90,7 @@ export function ProfilePage({
   function startEditing() {
     setDraft(toProfileFields(profile));
     setRollDraft(rollNumber);
+    setAvatarUrlDraft(profile.avatarUrl ?? "");
     setStatus("idle");
     setIsEditing(true);
   }
@@ -68,7 +98,42 @@ export function ProfilePage({
   function cancelEditing() {
     setDraft(toProfileFields(profile));
     setRollDraft(rollNumber);
+    setAvatarUrlDraft(profile.avatarUrl ?? "");
     setIsEditing(false);
+  }
+
+  async function refreshProfile() {
+    const row = await fetchProfile(profile.id);
+    onProfileSaved(mapUserRowToPeer(row, profile.collegeEmail));
+  }
+
+  async function handleAvatarFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setAvatarStatus("uploading");
+    try {
+      const url = await uploadAvatarImage(profile.id, file);
+      await updateAvatarUrl(profile.id, url);
+      setAvatarUrlDraft(url);
+      await refreshProfile();
+      setAvatarStatus("idle");
+    } catch {
+      setAvatarStatus("error");
+    }
+  }
+
+  async function handleAvatarUrlSave() {
+    const trimmed = avatarUrlDraft.trim();
+    if (!trimmed) return;
+    setAvatarStatus("uploading");
+    try {
+      await updateAvatarUrl(profile.id, trimmed);
+      await refreshProfile();
+      setAvatarStatus("idle");
+    } catch {
+      setAvatarStatus("error");
+    }
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -106,6 +171,46 @@ export function ProfilePage({
         {isEditing ? (
           <form className="card profile-edit-form" onSubmit={saveProfile}>
             <SectionHeader label="Edit profile" compact />
+            <div className="avatar-upload">
+              <div className="avatar-upload-preview">
+                <Avatar
+                  peer={{ ...profile, avatarUrl: avatarUrlDraft || profile.avatarUrl }}
+                  size="lg"
+                />
+                <button
+                  type="button"
+                  className="avatar-upload-camera"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  aria-label="Change profile picture"
+                >
+                  <Camera size={14} weight="fill" />
+                </button>
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="avatar-upload-input"
+                  onChange={handleAvatarFileChange}
+                />
+              </div>
+              <label className="field">
+                <span>Or paste a profile picture URL</span>
+                <div className="avatar-url-row">
+                  <input
+                    value={avatarUrlDraft}
+                    onChange={(event) => setAvatarUrlDraft(event.target.value)}
+                    placeholder="https://..."
+                  />
+                  <button type="button" className="btn btn-secondary" onClick={handleAvatarUrlSave}>
+                    Save
+                  </button>
+                </div>
+              </label>
+              {avatarStatus === "uploading" && <p className="profile-meta">Uploading...</p>}
+              {avatarStatus === "error" && (
+                <p className="form-error">Could not update your photo. Try the URL field instead.</p>
+              )}
+            </div>
             <label className="field">
               <span>Name</span>
               <input
@@ -202,13 +307,34 @@ export function ProfilePage({
                 <h3>{profile.name}</h3>
                 <VerifiedBadge />
               </div>
+              <div className="reward-summary">
+                <span className="level-pill">⚡ {levelLabel(profile.level)}</span>
+                <span className="coins-pill">🪙 {profile.peerCoins} PeerCoins</span>
+                {earnedBadges.length > 0 && (
+                  <span className="badge-icon-row">
+                    {BADGE_DEFINITIONS.filter((badge) => earnedBadges.includes(badge.type))
+                      .slice(0, 3)
+                      .map((badge) => (
+                        <span key={badge.type} className="badge-icon" title={badge.label}>
+                          {badge.emoji}
+                        </span>
+                      ))}
+                  </span>
+                )}
+              </div>
               <p>
                 {profile.department} · {profile.year}
               </p>
               <p className="profile-meta">{profile.building}</p>
               {profile.collegeEmail && <p className="profile-meta">{profile.collegeEmail}</p>}
               {rollNumber && <p className="profile-meta">Roll number: {rollNumber}</p>}
-              <blockquote>{profile.bio}</blockquote>
+              {meaningfulBio(profile.bio) ? (
+                <blockquote>{meaningfulBio(profile.bio)}</blockquote>
+              ) : (
+                <p className="profile-meta bio-empty">
+                  No bio yet — add one from Edit Profile.
+                </p>
+              )}
             </div>
             <div className="skill-columns">
               <div>
@@ -232,6 +358,7 @@ export function ProfilePage({
                 </div>
               </div>
             </div>
+            {profile.github && <GithubStatsCard github={profile.github} />}
             <button className="btn btn-secondary profile-edit-trigger" onClick={startEditing}>
               Edit profile
             </button>
@@ -246,7 +373,12 @@ export function ProfilePage({
                 <SkillTag key={skill.name} label={skill.name} wants />
               ))}
             {profile.skills.filter((skill) => skill.type === "wants").length === 0 && (
-              <p className="profile-meta">Add skills you want to learn from the edit form.</p>
+              <p className="learning-goal-empty">
+                <em>What do you want to learn next?</em>
+                <button type="button" className="learning-goal-add" onClick={startEditing}>
+                  + Add goal
+                </button>
+              </p>
             )}
           </div>
         </article>
