@@ -1,4 +1,4 @@
-import { PaperPlaneTilt } from "@phosphor-icons/react";
+import { Checks, PaperPlaneTilt } from "@phosphor-icons/react";
 import { FormEvent, useEffect, useRef } from "react";
 import { Avatar } from "../components/ui/Avatar";
 import { PageIntro } from "../components/ui/PageIntro";
@@ -106,7 +106,15 @@ export function MessagesPage({
                 key={message.id}
               >
                 <p>{message.body}</p>
-                <time>{message.time}</time>
+                <time className="message-meta">
+                  {message.time}
+                  {message.senderId === currentUserId &&
+                    (message.readAt ? (
+                      <Checks className="read-receipt read" size={15} weight="bold" aria-label="Seen" />
+                    ) : (
+                      <Checks className="read-receipt" size={15} weight="bold" aria-label="Sent" />
+                    ))}
+                </time>
               </article>
             ))}
           </div>
@@ -116,7 +124,7 @@ export function MessagesPage({
               onChange={(event) => onDraftChange(event.target.value)}
               placeholder="Write a reply"
             />
-            <button className="btn btn-primary" aria-label="Send message">
+            <button className="btn btn-primary" type="submit" aria-label="Send message">
               <PaperPlaneTilt size={17} weight="fill" />
             </button>
           </form>
