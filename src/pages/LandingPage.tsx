@@ -1,4 +1,4 @@
-import { GithubLogo } from "@phosphor-icons/react";
+import { ArrowLeft, GithubLogo } from "@phosphor-icons/react";
 import { FormEvent, useState } from "react";
 import { supabase } from "../lib/supabase";
 
@@ -92,6 +92,10 @@ export function LandingPage() {
   return (
     <div className="landing-shell">
       <div className="landing-card card">
+        <a href="/landing.html" className="back-link">
+          <ArrowLeft size={14} weight="bold" />
+          Back to landing page
+        </a>
         <div className="brand">
           <span className="brand-mark">PS</span>
           <div>

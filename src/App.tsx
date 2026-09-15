@@ -1,6 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnnouncementStrip } from "./components/layout/AnnouncementStrip";
+import { flushSync } from "react-dom";
 import { BottomTabBar } from "./components/layout/BottomTabBar";
 import { GithubSkillsPrompt } from "./components/layout/GithubSkillsPrompt";
 import { MobileDrawer } from "./components/layout/MobileDrawer";
@@ -22,6 +22,7 @@ import {
   completeSessionRow,
   createCollaborationRow,
   createPostRow,
+  deleteAccount,
   fetchCollaborations,
   fetchConversations,
   fetchNotifications,
@@ -131,6 +132,61 @@ function App() {
     document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
   }, [isDarkMode]);
 
+  // Reveals the new theme as a circle growing out of the click point. Falls
+  // back to a color crossfade where View Transitions aren't supported, and
+  // switches instantly for users who ask for reduced motion.
+  const changeTheme = useCallback(
+    (next: ThemePreference, origin?: { x: number; y: number }) => {
+      const root = document.documentElement;
+      const nextIsDark = next === "system" ? systemPrefersDark : next === "dark";
+      if (nextIsDark === isDarkMode) {
+        setThemePreference(next);
+        return;
+      }
+
+      const applyTheme = () => {
+        // The view transition snapshots the DOM right after this callback,
+        // so the new theme has to be on the page synchronously - not in the
+        // useEffect above, which runs later.
+        flushSync(() => setThemePreference(next));
+        root.dataset.theme = nextIsDark ? "dark" : "light";
+      };
+
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        applyTheme();
+        return;
+      }
+
+      if (typeof document.startViewTransition !== "function") {
+        root.classList.add("theme-transition");
+        applyTheme();
+        window.setTimeout(() => root.classList.remove("theme-transition"), 400);
+        return;
+      }
+
+      const x = origin?.x ?? window.innerWidth / 2;
+      const y = origin?.y ?? 0;
+      const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+
+      document
+        .startViewTransition(applyTheme)
+        .ready.then(() => {
+          root.animate(
+            { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endRadius}px at ${x}px ${y}px)`] },
+            {
+              duration: 550,
+              easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+              pseudoElement: "::view-transition-new(root)"
+            }
+          );
+        })
+        .catch(() => {
+          // Transition was skipped (e.g. tab hidden) - the theme still applied.
+        });
+    },
+    [isDarkMode, systemPrefersDark]
+  );
+
   useEffect(() => {
     try {
       window.localStorage.setItem("peerspace-theme", themePreference);
@@ -211,7 +267,10 @@ function App() {
           setProfile(mapUserRowToPeer(refreshedRow, currentSession.user.email ?? undefined));
           if (addedSkills.length > 0) setGithubSkillsPrompt(addedSkills);
         })
-        .catch(() => {});
+        .catch((error) => {
+          console.error("GitHub profile import failed:", error);
+          githubImportedRef.current = null;
+        });
     }
 
     fetchProfile(session.user.id)
@@ -323,42 +382,58 @@ function App() {
     const client = supabase;
     const userId = profile.id;
 
-    const messageChannel = subscribeToMessages((message) => {
-      const isMine = message.senderId === userId;
-      const openConvId = selectedConversationIdRef.current;
-      const currentScreen = activeScreenRef.current;
-      const currentConversations = conversationsRef.current;
-      const toastId = `${message.id}-toast`;
-      const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
+    const messageChannel = subscribeToMessages({
+      onInsert: (message) => {
+        const isMine = message.senderId === userId;
+        const openConvId = selectedConversationIdRef.current;
+        const currentScreen = activeScreenRef.current;
+        const currentConversations = conversationsRef.current;
+        const toastId = `${message.id}-toast`;
+        const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
 
-      setConversations((prev) => {
-        const index = prev.findIndex((c) => c.id === message.conversationId);
-        if (index === -1) return prev;
-        if (prev[index].messages.some((m) => m.id === message.id)) return prev;
+        setConversations((prev) => {
+          const index = prev.findIndex((c) => c.id === message.conversationId);
+          if (index === -1) return prev;
+          if (prev[index].messages.some((m) => m.id === message.id)) return prev;
 
-        const isOpen = openConvId === prev[index].id;
-        const next = [...prev];
-        next[index] = {
-          ...prev[index],
-          messages: [...prev[index].messages, message],
-          unread: !isMine && !isOpen ? prev[index].unread + 1 : prev[index].unread
-        };
-        return next;
-      });
+          const isOpen = openConvId === prev[index].id;
+          const next = [...prev];
+          next[index] = {
+            ...prev[index],
+            messages: [...prev[index].messages, message],
+            unread: !isMine && !isOpen ? prev[index].unread + 1 : prev[index].unread
+          };
+          return next;
+        });
 
-      if (!isMine && isOpenAndVisible) {
-        locallyReadIds.current.add(message.conversationId);
-        markConversationRead(message.conversationId, userId).catch(() => {});
-      }
+        if (!isMine && isOpenAndVisible) {
+          locallyReadIds.current.add(message.conversationId);
+          markConversationRead(message.conversationId, userId).catch(() => {});
+        }
 
-      if (!isMine && !shownToastIds.current.has(toastId)) {
-        if (!isOpenAndVisible) {
-          const conv = currentConversations.find((c) => c.id === message.conversationId);
-          if (conv) {
-            shownToastIds.current.add(toastId);
-            setMessageToasts((toasts) => [...toasts, { id: toastId, sender: conv.peer, body: message.body }]);
+        if (!isMine && !shownToastIds.current.has(toastId)) {
+          if (!isOpenAndVisible) {
+            const conv = currentConversations.find((c) => c.id === message.conversationId);
+            if (conv) {
+              shownToastIds.current.add(toastId);
+              setMessageToasts((toasts) => [...toasts, { id: toastId, sender: conv.peer, body: message.body }]);
+            }
           }
         }
+      },
+      onUpdate: (message) => {
+        setConversations((prev) => {
+          const index = prev.findIndex((c) => c.id === message.conversationId);
+          if (index === -1) return prev;
+          const messageIndex = prev[index].messages.findIndex((m) => m.id === message.id);
+          if (messageIndex === -1) return prev;
+
+          const nextMessages = [...prev[index].messages];
+          nextMessages[messageIndex] = { ...nextMessages[messageIndex], readAt: message.readAt };
+          const next = [...prev];
+          next[index] = { ...prev[index], messages: nextMessages };
+          return next;
+        });
       }
     });
 
@@ -452,6 +527,12 @@ function App() {
   async function handleLogout() {
     if (!supabase) return;
     await supabase.auth.signOut();
+  }
+
+  async function handleDeleteAccount() {
+    await deleteAccount();
+    // The account no longer exists server-side, so only clear the local session.
+    await supabase?.auth.signOut({ scope: "local" });
   }
 
   function handleSearchPeople(query: string) {
@@ -657,7 +738,7 @@ function App() {
           pageTitle={pageTitle}
           peerCoins={profile.peerCoins}
           isDarkMode={isDarkMode}
-          onToggleDarkMode={() => setThemePreference(isDarkMode ? "light" : "dark")}
+          onToggleDarkMode={(origin) => changeTheme(isDarkMode ? "light" : "dark", origin)}
           onSearchPeople={handleSearchPeople}
           onOpenMenu={() => setIsMobileMenuOpen(true)}
         />
@@ -749,8 +830,9 @@ function App() {
               <SettingsPage
                 profile={profile}
                 themePreference={themePreference}
-                onSetThemePreference={setThemePreference}
+                onSetThemePreference={changeTheme}
                 onLogout={handleLogout}
+                onDeleteAccount={handleDeleteAccount}
               />
             )}
           </main>

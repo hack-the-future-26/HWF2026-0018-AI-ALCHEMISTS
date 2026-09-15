@@ -312,6 +312,26 @@ app.post("/api/notifications/read", async (request: Request, response: Response)
   response.json({ ok: true });
 });
 
+app.delete("/api/account", async (request: Request, response: Response) => {
+  const auth = await getAuthContext(request, response);
+  if (!auth) return;
+
+  if (!supabaseAdmin) {
+    response.status(503).json({ error: "Account deletion requires SUPABASE_SERVICE_ROLE_KEY on the API server." });
+    return;
+  }
+
+  // Deleting the auth user cascades (via `on delete cascade` foreign keys)
+  // through public.users and every table that references it.
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(auth.user.id);
+  if (error) {
+    response.status(500).json({ error: error.message });
+    return;
+  }
+
+  response.json({ ok: true });
+});
+
 app.listen(port, () => {
   console.log(`PeerSpace API listening on http://localhost:${port}`);
 });

@@ -32,7 +32,7 @@ export function CollaborationComposer({
 
   return (
     <form className="card create-form" onSubmit={handleSubmit}>
-      <SectionHeader label="Post a collaboration request" compact />
+      <SectionHeader label="Post a collaboration request" compact onBack={onCancel} />
       <label className="field">
         <span>Project title</span>
         <input

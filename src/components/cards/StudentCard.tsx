@@ -9,12 +9,14 @@ import { VerifiedBadge } from "../ui/VerifiedBadge";
 export function StudentCard({
   peer,
   isGoodMatch = false,
+  matchedSkill,
   onMessage,
   onInviteToCollaborate,
   onScheduleSession
 }: {
   peer: Peer;
   isGoodMatch?: boolean;
+  matchedSkill?: string;
   onMessage: (peer: Peer) => void;
   onInviteToCollaborate: (peer: Peer) => void;
   onScheduleSession: (peer: Peer) => void;
@@ -46,7 +48,11 @@ export function StudentCard({
           <SectionHeader label={`Skills ${peer.name} offers`} compact />
           <div className="tag-cloud">
             {offered.map((skill) => (
-              <SkillTag key={skill.name} label={skill.name} />
+              <SkillTag
+                key={skill.name}
+                label={skill.name}
+                matched={skill.name === matchedSkill}
+              />
             ))}
           </div>
         </div>
@@ -54,7 +60,12 @@ export function StudentCard({
           <SectionHeader label="Wants to learn" compact />
           <div className="tag-cloud">
             {wants.map((skill) => (
-              <SkillTag key={skill.name} label={skill.name} wants />
+              <SkillTag
+                key={skill.name}
+                label={skill.name}
+                wants
+                matched={skill.name === matchedSkill}
+              />
             ))}
           </div>
         </div>
