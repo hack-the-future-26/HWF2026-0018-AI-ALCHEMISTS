@@ -55,6 +55,9 @@ create table public.conversations (
   constraint no_self_conversation check (peer_a <> peer_b)
 );
 
+create unique index conversations_peer_pair_key
+  on public.conversations (least(peer_a, peer_b), greatest(peer_a, peer_b));
+
 create table public.messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations(id) on delete cascade,

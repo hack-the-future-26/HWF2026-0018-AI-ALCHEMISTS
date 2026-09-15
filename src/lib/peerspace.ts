@@ -393,7 +393,24 @@ export async function findOrCreateConversation(userId: string, peerId: string): 
     .insert({ created_by: userId, peer_a: userId, peer_b: peerId })
     .select()
     .single();
-  if (insertError) throw insertError;
+  if (insertError) {
+    // Unique-violation (23505): the other side created the same conversation
+    // in a race. Re-fetch instead of failing the whole "start chat" action.
+    if (insertError.code === "23505") {
+      const { data: retry, error: retryError } = await client
+        .from("conversations")
+        .select("*")
+        .or(`peer_a.eq.${userId},peer_b.eq.${userId}`);
+      if (retryError) throw retryError;
+      const retryMatch = (retry ?? []).find(
+        (row: any) =>
+          (row.peer_a === userId && row.peer_b === peerId) ||
+          (row.peer_b === userId && row.peer_a === peerId)
+      );
+      if (retryMatch) return retryMatch.id;
+    }
+    throw insertError;
+  }
   return data.id;
 }
 

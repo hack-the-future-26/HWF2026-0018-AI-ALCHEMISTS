@@ -25,7 +25,9 @@ export function Sidebar({
       </a>
       <div className="sidebar-top">
         <div className="brand">
-          <span className="brand-mark">PS</span>
+          <span className="brand-mark">
+            <img src="/peerspace-logo.jpeg" alt="" />
+          </span>
           <div>
             <strong>PeerSpace</strong>
             <span className="network-pill">Campus network</span>

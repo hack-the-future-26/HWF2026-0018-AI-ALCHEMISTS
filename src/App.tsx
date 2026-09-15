@@ -111,6 +111,8 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [composerDraft, setComposerDraft] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [messageToasts, setMessageToasts] = useState<MessageToastData[]>([]);
 
   const selectedConversationIdRef = useRef<string | null>(null);
@@ -122,6 +124,12 @@ function App() {
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId;
   }, [selectedConversationId]);
+
+  useEffect(() => {
+    if (!actionError) return;
+    const timer = setTimeout(() => setActionError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [actionError]);
   useEffect(() => {
     activeScreenRef.current = activeScreen;
   }, [activeScreen]);
@@ -662,11 +670,12 @@ function App() {
           ? prev
           : [...prev, { id: conversationId, peer, unread: 0, messages: [] }]
       );
+      setSendError(null);
       setComposerDraft(draftText);
       setSelectedConversationId(conversationId);
       setActiveScreen("messages");
     } catch {
-      // no-op: leave the user on the current screen if the conversation couldn't be created
+      setActionError(`Couldn't start a conversation with ${peer.name}. Please try again.`);
     }
   }
 
@@ -699,6 +708,7 @@ function App() {
     const trimmed = body.trim();
     if (!trimmed || !profile || !selectedConversationId) return;
     setComposerDraft("");
+    setSendError(null);
     try {
       const message = await sendMessageRow(selectedConversationId, profile.id, trimmed);
       if (!message) return;
@@ -711,8 +721,11 @@ function App() {
       );
     } catch {
       setComposerDraft(trimmed);
+      setSendError("Message didn't send. Please try again.");
     }
   }
+
+  const handleDismissSendError = useCallback(() => setSendError(null), []);
 
   if (!hasSupabaseConfig || !supabase) {
     return (
@@ -847,9 +860,11 @@ function App() {
                 conversations={conversations}
                 selectedConversationId={selectedConversationId}
                 draft={composerDraft}
+                error={sendError}
                 onSelectConversation={setSelectedConversationId}
                 onDraftChange={setComposerDraft}
                 onSendMessage={handleSendMessage}
+                onDismissError={handleDismissSendError}
               />
             )}
             {activeScreen === "sessions" && (
@@ -904,6 +919,16 @@ function App() {
         onDismiss={handleDismissToast}
         onOpen={handleOpenToastConversation}
       />
+      {actionError && (
+        <div className="message-toast-stack" aria-live="assertive">
+          <div className="message-composer-error action-error-toast" role="alert">
+            <span>{actionError}</span>
+            <button type="button" onClick={() => setActionError(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
