@@ -12,11 +12,13 @@ export function TopBar({
   pageTitle: string;
   peerCoins: number;
   isDarkMode: boolean;
-  onToggleDarkMode: () => void;
+  onToggleDarkMode: (origin: { x: number; y: number }) => void;
   onSearchPeople: (query: string) => void;
   onOpenMenu: () => void;
 }) {
   const [query, setQuery] = useState("");
+  // Only spin the icon after a real toggle, not on every page load.
+  const [hasToggledTheme, setHasToggledTheme] = useState(false);
 
   return (
     <header className="topbar">
@@ -44,10 +46,19 @@ export function TopBar({
         </span>
         <button
           className="theme-toggle"
-          onClick={onToggleDarkMode}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setHasToggledTheme(true);
+            onToggleDarkMode({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+          }}
           aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
         >
-          {isDarkMode ? <Sun size={18} /> : <MoonStars size={18} />}
+          <span
+            key={isDarkMode ? "sun" : "moon"}
+            className={hasToggledTheme ? "theme-toggle-icon spin-in" : "theme-toggle-icon"}
+          >
+            {isDarkMode ? <Sun size={18} /> : <MoonStars size={18} />}
+          </span>
         </button>
       </div>
     </header>

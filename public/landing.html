@@ -89,13 +89,22 @@ nav {
   text-align: center;
   overflow: hidden;
 }
+@media (min-width: 861px) {
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+}
 .hero::before {
   content: '';
   position: absolute; inset: 0;
   background:
-    radial-gradient(circle at 1px 1px, var(--border) 0.5px, transparent 0)
-    0 0 / 28px 28px;
-  opacity: 0.5;
+    radial-gradient(circle at 1px 1px, rgba(17,17,17,0.14) 1.5px, transparent 0)
+    0 0 / 26px 26px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 40%, transparent 90%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 40%, transparent 90%);
   pointer-events: none;
 }
 .hero-inner {
@@ -150,6 +159,9 @@ nav {
   .float:nth-child(2) { animation-delay: -1.5s; animation-duration: 8s; }
   .float:nth-child(3) { animation-delay: -3s; animation-duration: 6.5s; }
   .float:nth-child(4) { animation-delay: -4.5s; animation-duration: 7.5s; }
+  .float:nth-child(5) { animation-delay: -2s; animation-duration: 7.5s; }
+  .float:nth-child(6) { animation-delay: -5s; animation-duration: 6.8s; }
+  .float:nth-child(7) { animation-delay: -0.8s; animation-duration: 8.2s; }
 }
 @keyframes drift {
   0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); }
@@ -179,6 +191,25 @@ nav {
   bottom: 16%; right: 4%;
   padding: 16px 20px;
   width: 210px;
+}
+.float-streak {
+  --r: -4deg;
+  top: 42%; left: 3%;
+  padding: 16px 22px;
+  width: 150px;
+  text-align: center;
+}
+.float-rating {
+  --r: 3deg;
+  top: 40%; right: 3%;
+  padding: 16px 20px;
+  width: 200px;
+}
+.float-mentors {
+  --r: 2deg;
+  bottom: 40%; left: 5%;
+  padding: 16px 20px;
+  width: 190px;
 }
 
 .fl-label {
@@ -757,6 +788,27 @@ footer a:hover { color: var(--fg); }
         <div class="fl-name">92% skill match</div>
         <div class="fl-meta">Leah &middot; UX Research, Figma</div>
       </div>
+    </div>
+  </div>
+
+  <div class="float float-streak">
+    <div class="fl-coin-val">🔥 7</div>
+    <div class="fl-coin-sub">Day streak</div>
+  </div>
+
+  <div class="float float-rating">
+    <div class="fl-row">
+      <div class="fl-avatar">★</div>
+      <div>
+        <div class="fl-name">4.9 rating</div>
+        <div class="fl-meta">2,300+ sessions taught</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="float float-mentors">
+    <div class="fl-tags">
+      <span class="fl-tag">1,200+ mentors</span>
     </div>
   </div>
 

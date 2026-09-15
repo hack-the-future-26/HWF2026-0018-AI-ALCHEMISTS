@@ -21,16 +21,32 @@ export function SettingsPage({
   profile,
   themePreference,
   onSetThemePreference,
-  onLogout
+  onLogout,
+  onDeleteAccount
 }: {
   profile: Peer;
   themePreference: ThemePreference;
-  onSetThemePreference: (value: ThemePreference) => void;
+  onSetThemePreference: (value: ThemePreference, origin?: { x: number; y: number }) => void;
   onLogout: () => void;
+  onDeleteAccount: () => Promise<void>;
 }) {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [sessionReminders, setSessionReminders] = useState(true);
   const [newMessageAlerts, setNewMessageAlerts] = useState(true);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [deleteStatus, setDeleteStatus] = useState<"idle" | "pending" | "error">("idle");
+  const [deleteError, setDeleteError] = useState("");
+
+  async function handleDeleteAccount() {
+    setDeleteStatus("pending");
+    setDeleteError("");
+    try {
+      await onDeleteAccount();
+    } catch (err) {
+      setDeleteStatus("error");
+      setDeleteError(err instanceof Error ? err.message : "Could not delete your account.");
+    }
+  }
 
   return (
     <div className="page-stack">
@@ -51,7 +67,13 @@ export function SettingsPage({
                 role="radio"
                 aria-checked={themePreference === option.value}
                 className={themePreference === option.value ? "segment active" : "segment"}
-                onClick={() => onSetThemePreference(option.value)}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onSetThemePreference(option.value, {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2
+                  });
+                }}
               >
                 {option.label}
               </button>
@@ -109,6 +131,43 @@ export function SettingsPage({
         <button className="btn btn-secondary settings-logout" onClick={onLogout}>
           Log out
         </button>
+      </section>
+
+      <section className="card settings-section settings-danger-zone">
+        <SectionHeader label="Danger zone" compact />
+        <p className="settings-danger-copy">
+          Permanently deletes your profile, posts, messages, sessions, and everything else tied to
+          your account. This can't be undone.
+        </p>
+        {deleteStatus === "error" && <p className="form-error">{deleteError}</p>}
+        {isConfirmingDelete ? (
+          <div className="settings-danger-confirm">
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={handleDeleteAccount}
+              disabled={deleteStatus === "pending"}
+            >
+              {deleteStatus === "pending" ? "Deleting..." : "Yes, delete my account"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setIsConfirmingDelete(false);
+                setDeleteStatus("idle");
+                setDeleteError("");
+              }}
+              disabled={deleteStatus === "pending"}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="btn btn-danger" onClick={() => setIsConfirmingDelete(true)}>
+            Delete account
+          </button>
+        )}
       </section>
 
       <section className="card settings-section about-section">

@@ -28,7 +28,7 @@ export function PostComposer({
 
   return (
     <form className="card create-form" onSubmit={handleSubmit}>
-      <SectionHeader label="Share an update" compact />
+      <SectionHeader label="Share an update" compact onBack={onCancel} />
       <label className="field">
         <span>Post type</span>
         <select value={tag} onChange={(event) => setTag(event.target.value)}>

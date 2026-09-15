@@ -43,15 +43,16 @@ export function SearchPage({
   // sort order and whether the "Good match" badge shows.
   const mySkills = matchTab === "knows" ? knows : wants;
   const theirType = matchTab === "knows" ? "wants" : "knows";
+  function matchedSkillFor(peer: Peer) {
+    if (mySkills.length === 0) return undefined;
+    return peer.skills.find(
+      (skill) =>
+        skill.type === theirType &&
+        mySkills.some((mine) => mine.name.toLowerCase() === skill.name.toLowerCase())
+    )?.name;
+  }
   function isGoodMatch(peer: Peer) {
-    return (
-      mySkills.length > 0 &&
-      peer.skills.some(
-        (skill) =>
-          skill.type === theirType &&
-          mySkills.some((mine) => mine.name.toLowerCase() === skill.name.toLowerCase())
-      )
-    );
+    return Boolean(matchedSkillFor(peer));
   }
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -91,6 +92,14 @@ export function SearchPage({
         </button>
         <span>Showing {results.length} verified students</span>
       </div>
+
+      {mySkills.length === 0 && (
+        <p className="profile-meta">
+          {matchTab === "knows"
+            ? "Add skills you know on your profile to see who you can teach."
+            : "Add skills you want to learn on your profile to see who can teach you."}
+        </p>
+      )}
 
       {(knows.length > 0 || wants.length > 0) && (
         <p className="profile-meta">
@@ -165,6 +174,7 @@ export function SearchPage({
             key={peer.id}
             peer={peer}
             isGoodMatch={isGoodMatch(peer)}
+            matchedSkill={matchedSkillFor(peer)}
             onMessage={onMessagePeer}
             onInviteToCollaborate={onInviteToCollaborate}
             onScheduleSession={onScheduleSession}

@@ -1,4 +1,5 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { apiRequest } from "./api";
 import type { ContributionWeek } from "./github";
 import { supabase } from "./supabase";
 
@@ -226,6 +227,10 @@ export async function upsertProfile(
     avatar_initials: initialsFor(fields.fullName)
   });
   if (error) throw error;
+}
+
+export async function deleteAccount() {
+  await apiRequest("/api/account", { method: "DELETE" });
 }
 
 export async function syncSkills(userId: string, offered: string[], wanted: string[]) {
