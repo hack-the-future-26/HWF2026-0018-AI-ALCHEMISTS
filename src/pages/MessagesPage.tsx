@@ -17,17 +17,21 @@ export function MessagesPage({
   conversations,
   selectedConversationId,
   draft,
+  error,
   onSelectConversation,
   onDraftChange,
-  onSendMessage
+  onSendMessage,
+  onDismissError
 }: {
   currentUserId: string;
   conversations: Conversation[];
   selectedConversationId: string | null;
   draft: string;
+  error: string | null;
   onSelectConversation: (id: string) => void;
   onDraftChange: (value: string) => void;
   onSendMessage: (body: string) => void;
+  onDismissError: () => void;
 }) {
   const selectedConversation =
     conversations.find((conversation) => conversation.id === selectedConversationId) ??
@@ -118,6 +122,14 @@ export function MessagesPage({
               </article>
             ))}
           </div>
+          {error && (
+            <div className="message-composer-error" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={onDismissError}>
+                Dismiss
+              </button>
+            </div>
+          )}
           <form className="message-composer" onSubmit={sendMessage}>
             <input
               value={draft}

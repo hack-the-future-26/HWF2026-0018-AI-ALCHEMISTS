@@ -34,6 +34,7 @@ import {
   incrementSessionsTaught,
   mapUserRowToPeer,
   markConversationRead,
+  markMessageNotificationsRead,
   mergeGithubOfferedSkills,
   saveGithubProfileData,
   sendMessageRow,
@@ -110,6 +111,8 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [composerDraft, setComposerDraft] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [messageToasts, setMessageToasts] = useState<MessageToastData[]>([]);
 
   const selectedConversationIdRef = useRef<string | null>(null);
@@ -121,6 +124,12 @@ function App() {
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId;
   }, [selectedConversationId]);
+
+  useEffect(() => {
+    if (!actionError) return;
+    const timer = setTimeout(() => setActionError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [actionError]);
   useEffect(() => {
     activeScreenRef.current = activeScreen;
   }, [activeScreen]);
@@ -411,6 +420,23 @@ function App() {
           markConversationRead(message.conversationId, userId).catch(() => {});
         }
 
+        // The database trigger has already created/refreshed the recipient's
+        // notification by the time this event arrives. If the chat is open,
+        // it's already seen, so clear it before reloading the list.
+        if (!isMine) {
+          const refreshNotifications = () =>
+            fetchNotifications(userId)
+              .then(setNotificationRows)
+              .catch(() => {});
+          if (isOpenAndVisible) {
+            markMessageNotificationsRead(userId, message.senderId)
+              .catch(() => {})
+              .finally(refreshNotifications);
+          } else {
+            refreshNotifications();
+          }
+        }
+
         if (!isMine && !shownToastIds.current.has(toastId)) {
           if (!isOpenAndVisible) {
             const conv = currentConversations.find((c) => c.id === message.conversationId);
@@ -486,8 +512,34 @@ function App() {
     );
 
     markConversationRead(selectedConversationId, profile.id).catch(() => {});
+
+    const peerId = conversationsRef.current.find((item) => item.id === selectedConversationId)?.peer.id;
+    if (peerId) {
+      setNotificationRows((prev) =>
+        prev.map((notification) =>
+          notification.kind === "message" && notification.actorId === peerId && notification.status === "unread"
+            ? { ...notification, status: "read" }
+            : notification
+        )
+      );
+      markMessageNotificationsRead(profile.id, peerId).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeScreen, selectedConversationId, authPhase, profile?.id]);
+
+  // New sign-ups and notifications created while the tab was in the
+  // background show up as soon as the user comes back to it.
+  const profileId = profile?.id;
+  useEffect(() => {
+    if (authPhase !== "ready" || !profileId) return;
+    const userId = profileId;
+    function handleFocus() {
+      fetchPeers(userId).then(setPeersDirectory).catch(() => {});
+      fetchNotifications(userId).then(setNotificationRows).catch(() => {});
+    }
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [authPhase, profileId]);
 
   const collaborations: Collaboration[] = useMemo(() => {
     if (!profile) return [];
@@ -618,11 +670,12 @@ function App() {
           ? prev
           : [...prev, { id: conversationId, peer, unread: 0, messages: [] }]
       );
+      setSendError(null);
       setComposerDraft(draftText);
       setSelectedConversationId(conversationId);
       setActiveScreen("messages");
     } catch {
-      // no-op: leave the user on the current screen if the conversation couldn't be created
+      setActionError(`Couldn't start a conversation with ${peer.name}. Please try again.`);
     }
   }
 
@@ -655,6 +708,7 @@ function App() {
     const trimmed = body.trim();
     if (!trimmed || !profile || !selectedConversationId) return;
     setComposerDraft("");
+    setSendError(null);
     try {
       const message = await sendMessageRow(selectedConversationId, profile.id, trimmed);
       if (!message) return;
@@ -667,8 +721,11 @@ function App() {
       );
     } catch {
       setComposerDraft(trimmed);
+      setSendError("Message didn't send. Please try again.");
     }
   }
+
+  const handleDismissSendError = useCallback(() => setSendError(null), []);
 
   if (!hasSupabaseConfig || !supabase) {
     return (
@@ -770,6 +827,8 @@ function App() {
                 profile={profile}
                 posts={posts}
                 sessions={sessionRows}
+                peers={peersDirectory}
+                openCollaborationCount={collaborations.length}
                 now={now}
                 onNavigate={setActiveScreen}
                 onCreatePost={handleCreatePost}
@@ -801,9 +860,11 @@ function App() {
                 conversations={conversations}
                 selectedConversationId={selectedConversationId}
                 draft={composerDraft}
+                error={sendError}
                 onSelectConversation={setSelectedConversationId}
                 onDraftChange={setComposerDraft}
                 onSendMessage={handleSendMessage}
+                onDismissError={handleDismissSendError}
               />
             )}
             {activeScreen === "sessions" && (
@@ -858,6 +919,16 @@ function App() {
         onDismiss={handleDismissToast}
         onOpen={handleOpenToastConversation}
       />
+      {actionError && (
+        <div className="message-toast-stack" aria-live="assertive">
+          <div className="message-composer-error action-error-toast" role="alert">
+            <span>{actionError}</span>
+            <button type="button" onClick={() => setActionError(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

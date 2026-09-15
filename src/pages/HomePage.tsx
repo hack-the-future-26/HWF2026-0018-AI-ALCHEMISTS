@@ -1,18 +1,51 @@
-import { CaretDown, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import {
+  BookOpen,
+  CaretDown,
+  CheckCircle,
+  MagnifyingGlass,
+  NotePencil,
+  Plus,
+  UsersThree
+} from "@phosphor-icons/react";
 import { useState } from "react";
 import { FeedCard } from "../components/cards/FeedCard";
 import { PostComposer } from "../components/composers/PostComposer";
 import { SectionHeader } from "../components/ui/SectionHeader";
 import { UpcomingSessionWidget } from "../components/widgets/UpcomingSessionWidget";
-import { feedTabs, postTimeFilters, stats } from "../constants/navigation";
+import { feedTabs, postTimeFilters } from "../constants/navigation";
 import { greetingForHour } from "../lib/appStorage";
 import type { Peer, PostRow, SessionRow } from "../lib/peerspace";
 import type { NewPostInput, Screen } from "../types/app";
+
+// fetchPosts() loads the newest POSTS_PAGE_SIZE posts, so a weekly count that
+// uses every loaded post may be an undercount.
+const POSTS_PAGE_SIZE = 50;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function countLabel(count: number, isCapped: boolean) {
+  return isCapped ? `${count}+` : String(count);
+}
+
+// A peer is a match if they want to learn something you know, or know
+// something you want to learn - the same rule Find Peers uses.
+function isSkillMatch(profile: Peer, peer: Peer) {
+  const mine = (type: "knows" | "wants") =>
+    new Set(profile.skills.filter((skill) => skill.type === type).map((skill) => skill.name.toLowerCase()));
+  const myKnows = mine("knows");
+  const myWants = mine("wants");
+  return peer.skills.some(
+    (skill) =>
+      (skill.type === "wants" && myKnows.has(skill.name.toLowerCase())) ||
+      (skill.type === "knows" && myWants.has(skill.name.toLowerCase()))
+  );
+}
 
 export function HomePage({
   profile,
   posts,
   sessions,
+  peers,
+  openCollaborationCount,
   now,
   onNavigate,
   onCreatePost,
@@ -22,6 +55,8 @@ export function HomePage({
   profile: Peer;
   posts: PostRow[];
   sessions: SessionRow[];
+  peers: Peer[];
+  openCollaborationCount: number;
   now: Date;
   onNavigate: (screen: Screen) => void;
   onCreatePost: (input: NewPostInput) => void;
@@ -48,6 +83,26 @@ export function HomePage({
     return matchesTab && matchesQuery && matchesTime;
   });
 
+  const postsThisWeek = posts.filter((post) => now.getTime() - new Date(post.createdAt).getTime() <= WEEK_MS);
+  const postsCapped = posts.length >= POSTS_PAGE_SIZE && postsThisWeek.length === posts.length;
+  const groupPostsThisWeek = postsThisWeek.filter(
+    (post) => post.tag === "Peer group" || post.tag === "Study pod"
+  ).length;
+  const skillMatchCount = peers.filter((peer) => isSkillMatch(profile, peer)).length;
+
+  const stats = [
+    { label: "Open collaborations", value: String(openCollaborationCount), icon: BookOpen },
+    { label: "Students on PeerSpace", value: String(peers.length + 1), icon: UsersThree },
+    { label: "Posts this week", value: countLabel(postsThisWeek.length, postsCapped), icon: NotePencil },
+    { label: "Your skill matches", value: String(skillMatchCount), icon: CheckCircle }
+  ];
+
+  const groupsLabel = countLabel(groupPostsThisWeek, postsCapped);
+  const weeklySummary =
+    groupPostsThisWeek === 0
+      ? "No peer groups or study pods posted this week yet."
+      : `${groupsLabel} peer group and study pod ${groupPostsThisWeek === 1 && !postsCapped ? "post" : "posts"} this week.`;
+
   return (
     <div className="page-stack">
       <div className="home-mobile-session">
@@ -62,7 +117,7 @@ export function HomePage({
           <h1>
             {greetingForHour(now.getHours())}, {profile.name}
           </h1>
-          <p>PeerSpace College has 8 active study groups this week.</p>
+          <p>{weeklySummary}</p>
         </div>
         <div className="inline-search">
           <label>

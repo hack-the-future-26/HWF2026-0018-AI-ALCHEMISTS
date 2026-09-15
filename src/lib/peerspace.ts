@@ -393,7 +393,24 @@ export async function findOrCreateConversation(userId: string, peerId: string): 
     .insert({ created_by: userId, peer_a: userId, peer_b: peerId })
     .select()
     .single();
-  if (insertError) throw insertError;
+  if (insertError) {
+    // Unique-violation (23505): the other side created the same conversation
+    // in a race. Re-fetch instead of failing the whole "start chat" action.
+    if (insertError.code === "23505") {
+      const { data: retry, error: retryError } = await client
+        .from("conversations")
+        .select("*")
+        .or(`peer_a.eq.${userId},peer_b.eq.${userId}`);
+      if (retryError) throw retryError;
+      const retryMatch = (retry ?? []).find(
+        (row: any) =>
+          (row.peer_a === userId && row.peer_b === peerId) ||
+          (row.peer_b === userId && row.peer_a === peerId)
+      );
+      if (retryMatch) return retryMatch.id;
+    }
+    throw insertError;
+  }
   return data.id;
 }
 
@@ -566,6 +583,7 @@ export async function incrementSessionsTaught(userId: string, currentCount: numb
 
 export type NotificationRow = {
   id: string;
+  actorId: string | null;
   kind: "message" | "session" | "collaboration" | "profile_view";
   title: string;
   body: string;
@@ -583,12 +601,25 @@ export async function fetchNotifications(userId: string): Promise<NotificationRo
   if (error) throw error;
   return (data ?? []).map((row: any) => ({
     id: row.id,
+    actorId: row.actor_id ?? null,
     kind: row.kind,
     title: row.title,
     body: row.body,
     status: row.status,
     createdAt: row.created_at
   }));
+}
+
+export async function markMessageNotificationsRead(userId: string, senderId: string) {
+  const client = requireClient();
+  const { error } = await client
+    .from("notifications")
+    .update({ status: "read" })
+    .eq("user_id", userId)
+    .eq("actor_id", senderId)
+    .eq("kind", "message")
+    .eq("status", "unread");
+  if (error) throw error;
 }
 
 export type PostRow = {

@@ -10,14 +10,20 @@ export function NewPeersWidget({
   peers: Peer[];
   onConnect: (peer: Peer) => void;
 }) {
+  // The peer directory arrives sorted by name (for search), so re-sort here to
+  // surface the most recently created accounts.
+  const newestPeers = [...peers]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 5);
+
   return (
     <article className="widget card">
       <SectionHeader label="New on campus" compact />
-      {peers.length === 0 ? (
+      {newestPeers.length === 0 ? (
         <p className="profile-meta">No other verified students yet.</p>
       ) : (
         <div className="compact-peer-list">
-          {peers.slice(0, 5).map((peer) => (
+          {newestPeers.map((peer) => (
             <div className="compact-peer" key={peer.id}>
               <Avatar peer={peer} />
               <div>
