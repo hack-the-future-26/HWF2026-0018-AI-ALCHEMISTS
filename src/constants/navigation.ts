@@ -1,10 +1,7 @@
 import {
   Bell,
-  BookOpen,
   CalendarCheck,
   ChatCircle,
-  CirclesThreePlus,
-  CheckCircle,
   GearSix,
   House,
   MagnifyingGlass,
@@ -21,13 +18,6 @@ export type NavItem = {
   icon: typeof House;
   badge?: string;
 };
-
-export const stats = [
-  { label: "Active Projects", value: "14", icon: BookOpen },
-  { label: "Open Seats", value: "27", icon: UsersThree },
-  { label: "Study Pods", value: "8", icon: CirclesThreePlus },
-  { label: "Verified Match Rate", value: "94%", icon: CheckCircle }
-];
 
 export const navigation: NavItem[] = [
   { id: "home", label: "Home", icon: House },

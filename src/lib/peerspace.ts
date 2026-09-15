@@ -566,6 +566,7 @@ export async function incrementSessionsTaught(userId: string, currentCount: numb
 
 export type NotificationRow = {
   id: string;
+  actorId: string | null;
   kind: "message" | "session" | "collaboration" | "profile_view";
   title: string;
   body: string;
@@ -583,12 +584,25 @@ export async function fetchNotifications(userId: string): Promise<NotificationRo
   if (error) throw error;
   return (data ?? []).map((row: any) => ({
     id: row.id,
+    actorId: row.actor_id ?? null,
     kind: row.kind,
     title: row.title,
     body: row.body,
     status: row.status,
     createdAt: row.created_at
   }));
+}
+
+export async function markMessageNotificationsRead(userId: string, senderId: string) {
+  const client = requireClient();
+  const { error } = await client
+    .from("notifications")
+    .update({ status: "read" })
+    .eq("user_id", userId)
+    .eq("actor_id", senderId)
+    .eq("kind", "message")
+    .eq("status", "unread");
+  if (error) throw error;
 }
 
 export type PostRow = {

@@ -34,6 +34,7 @@ import {
   incrementSessionsTaught,
   mapUserRowToPeer,
   markConversationRead,
+  markMessageNotificationsRead,
   mergeGithubOfferedSkills,
   saveGithubProfileData,
   sendMessageRow,
@@ -411,6 +412,23 @@ function App() {
           markConversationRead(message.conversationId, userId).catch(() => {});
         }
 
+        // The database trigger has already created/refreshed the recipient's
+        // notification by the time this event arrives. If the chat is open,
+        // it's already seen, so clear it before reloading the list.
+        if (!isMine) {
+          const refreshNotifications = () =>
+            fetchNotifications(userId)
+              .then(setNotificationRows)
+              .catch(() => {});
+          if (isOpenAndVisible) {
+            markMessageNotificationsRead(userId, message.senderId)
+              .catch(() => {})
+              .finally(refreshNotifications);
+          } else {
+            refreshNotifications();
+          }
+        }
+
         if (!isMine && !shownToastIds.current.has(toastId)) {
           if (!isOpenAndVisible) {
             const conv = currentConversations.find((c) => c.id === message.conversationId);
@@ -486,8 +504,34 @@ function App() {
     );
 
     markConversationRead(selectedConversationId, profile.id).catch(() => {});
+
+    const peerId = conversationsRef.current.find((item) => item.id === selectedConversationId)?.peer.id;
+    if (peerId) {
+      setNotificationRows((prev) =>
+        prev.map((notification) =>
+          notification.kind === "message" && notification.actorId === peerId && notification.status === "unread"
+            ? { ...notification, status: "read" }
+            : notification
+        )
+      );
+      markMessageNotificationsRead(profile.id, peerId).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeScreen, selectedConversationId, authPhase, profile?.id]);
+
+  // New sign-ups and notifications created while the tab was in the
+  // background show up as soon as the user comes back to it.
+  const profileId = profile?.id;
+  useEffect(() => {
+    if (authPhase !== "ready" || !profileId) return;
+    const userId = profileId;
+    function handleFocus() {
+      fetchPeers(userId).then(setPeersDirectory).catch(() => {});
+      fetchNotifications(userId).then(setNotificationRows).catch(() => {});
+    }
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [authPhase, profileId]);
 
   const collaborations: Collaboration[] = useMemo(() => {
     if (!profile) return [];
@@ -770,6 +814,8 @@ function App() {
                 profile={profile}
                 posts={posts}
                 sessions={sessionRows}
+                peers={peersDirectory}
+                openCollaborationCount={collaborations.length}
                 now={now}
                 onNavigate={setActiveScreen}
                 onCreatePost={handleCreatePost}
