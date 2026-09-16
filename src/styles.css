@@ -721,7 +721,15 @@ html.theme-transition *::after {
   gap: 10px;
 }
 
+/* Mobile-only duplicates of the feed tab list and "New post" action; the
+   desktop layout keeps the tab buttons and the header-row button instead. */
+.feed-tab-select,
+.feed-new-post {
+  display: none;
+}
+
 .select-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -734,16 +742,43 @@ html.theme-transition *::after {
   border-radius: var(--radius-control);
 }
 
+/* When this control wraps a real <select>, the select itself must cover the
+   whole box - otherwise clicking the caret or the padding does nothing. The
+   caret is decorative and ignores pointer events so clicks fall through. */
+.select-button:has(select) {
+  justify-content: flex-start;
+  padding: 0;
+}
+
 .select-button select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: inherit;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
   outline: none;
+  padding: 0 28px 0 12px;
+  text-overflow: ellipsis;
+}
+
+.select-button select + svg {
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+}
+
+/* Native option lists take system colors unless told otherwise, which looks
+   broken against the dark theme. */
+.select-button select option {
+  background: var(--surface);
+  color: var(--text-body);
 }
 
 .select-button:hover,
@@ -1480,6 +1515,7 @@ blockquote {
 
 .conversation-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 6px;
   height: 100%;
@@ -1532,6 +1568,58 @@ blockquote {
   font-size: 11px;
   font-style: normal;
   font-weight: 700;
+}
+
+.conversation-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 0 10px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.conversation-search svg {
+  flex: none;
+}
+
+.conversation-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  border: none;
+  background: transparent;
+  color: var(--text-body);
+  padding: 0;
+}
+
+.conversation-search input:focus {
+  outline: none;
+}
+
+.conversation-empty {
+  padding: 8px;
+}
+
+.chat-back {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-body);
+  cursor: pointer;
+  padding: 0;
 }
 
 .chat-panel {
@@ -1635,6 +1723,7 @@ blockquote {
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-elevated, 0 8px 24px rgba(0, 0, 0, 0.15));
   padding: 12px 14px;
+  pointer-events: all;
 }
 
 .message-composer input {
@@ -1648,6 +1737,93 @@ blockquote {
 .session-grid {
   display: grid;
   gap: 12px;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.overflow-menu {
+  position: relative;
+}
+
+.overflow-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.overflow-menu-trigger:hover,
+.overflow-menu-trigger[aria-expanded="true"] {
+  border-color: var(--border);
+  background: var(--surface-hover);
+}
+
+.overflow-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  min-width: 150px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+}
+
+.overflow-menu-item {
+  border: none;
+  background: transparent;
+  color: var(--text-body);
+  text-align: left;
+  font-size: 13px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.overflow-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+.overflow-menu-item.danger {
+  color: var(--danger);
+}
+
+.confirm-dialog {
+  display: grid;
+  gap: 10px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 20px;
+}
+
+.modal-card {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+
+.modal-card .create-form {
+  box-shadow: var(--shadow-elevated, 0 8px 24px rgba(0, 0, 0, 0.25));
 }
 
 .notification-row {
@@ -2334,10 +2510,68 @@ blockquote {
 
   .home-mobile-session {
     display: block;
-    margin-bottom: 4px;
   }
 
-  .stats-row,
+  .home-hero {
+    gap: 12px;
+  }
+
+  .home-hero h1 {
+    font-size: 24px;
+  }
+
+  /* Collapse the feed chrome into one compact row so the posts start higher. */
+  .home-feed-header,
+  .feed-controls .tabs {
+    display: none;
+  }
+
+  .feed-controls {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  /* Scoped to .feed-controls so these beat the later `.btn { width: 100% }`
+     and `.select-button { width: 100% }` rules in the 620px block. */
+  .feed-controls .select-button,
+  .feed-controls .feed-new-post {
+    display: inline-flex;
+    width: auto;
+    min-width: 0;
+    min-height: 34px;
+    font-size: 12px;
+  }
+
+  .feed-controls .select-button {
+    flex: 1;
+  }
+
+  /* Padding belongs on the select, not the wrapper - see .select-button:has(select). */
+  .feed-controls .select-button select {
+    padding: 0 22px 0 8px;
+  }
+
+  .feed-controls .select-button svg {
+    right: 6px;
+  }
+
+  .feed-controls .feed-new-post {
+    flex: none;
+    gap: 4px;
+    padding: 0 10px;
+  }
+
+  .home-hero .inline-search {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .home-hero .inline-search .select-button {
+    width: auto;
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
   .collab-grid,
   .profile-grid,
   .skill-columns,
@@ -2345,6 +2579,33 @@ blockquote {
   .rewards-columns,
   .suggestion-grid {
     grid-template-columns: 1fr;
+  }
+
+  .page-intro {
+    display: none;
+  }
+
+  /* Home is primarily the feed on mobile, so ambient stats sit below it.
+     Every other .page-stack child keeps the default order of 0. */
+  .stats-row {
+    order: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .stat-card {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .stat-card strong {
+    margin-top: 1px;
+    font-size: 22px;
+  }
+
+  .stat-card .icon-box {
+    width: 28px;
+    height: 28px;
   }
 
   .stat-tile-row,
@@ -2365,8 +2626,34 @@ blockquote {
     border-bottom: 1px solid var(--border);
   }
 
+  .conversation-search {
+    position: static;
+  }
+
+  .messages-card[data-mobile-view="list"] .chat-panel {
+    display: none;
+  }
+
+  .messages-card[data-mobile-view="chat"] .conversation-list {
+    display: none;
+  }
+
+  .conversation-list {
+    border-bottom: 0;
+  }
+
+  .chat-back {
+    display: inline-flex;
+  }
+
+  .chat-header {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
   .chat-panel {
     height: auto;
+    min-height: 60vh;
   }
 
   .message-stream {
@@ -2442,7 +2729,85 @@ blockquote {
   to   { width: 0%;   }
 }
 
-.message-toast-stack {
+/* Floating "upcoming session" chip, pinned above the mobile tab bar so it stays
+   out of the feed's flow. Sits under .toast-layer, which transiently covers it. */
+.session-pill {
+  position: fixed;
+  right: 12px;
+  bottom: 84px;
+  z-index: 950;
+  display: flex;
+  align-items: stretch;
+  max-width: min(280px, calc(100vw - 24px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.12),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.session-pill-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-body);
+  text-align: left;
+  padding: 8px 4px 8px 10px;
+  cursor: pointer;
+}
+
+.session-pill-icon {
+  display: grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--active);
+  color: var(--accent);
+}
+
+.session-pill-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.session-pill-text strong,
+.session-pill-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-pill-text strong {
+  font-size: 13px;
+}
+
+.session-pill-text small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.session-pill-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.toast-layer {
   position: fixed;
   bottom: 24px;
   right: 24px;
@@ -2453,6 +2818,17 @@ blockquote {
   pointer-events: none;
   max-width: 360px;
   width: calc(100vw - 32px);
+}
+
+.message-toast-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.message-toast-stack:empty {
+  display: none;
 }
 
 .message-toast {
@@ -2577,7 +2953,7 @@ blockquote {
 }
 
 @media (max-width: 540px) {
-  .message-toast-stack {
+  .toast-layer {
     bottom: 80px;
     right: 12px;
     left: 12px;
