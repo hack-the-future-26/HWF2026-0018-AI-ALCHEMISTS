@@ -8,6 +8,7 @@ import { ProfilePrompt } from "./components/layout/ProfilePrompt";
 import { RightPanel } from "./components/layout/RightPanel";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
+import { BackToTopButton } from "./components/ui/BackToTopButton";
 import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { ScheduleSessionModal } from "./components/layout/ScheduleSessionModal";
 import type { ScheduleSessionInput } from "./components/composers/ScheduleSessionForm";
@@ -1134,6 +1135,7 @@ function App() {
         onNavigate={setActiveScreen}
         onLogout={handleLogout}
       />
+      <BackToTopButton />
       <div className="toast-layer">
         <SessionReminderToastStack
           toasts={sessionReminderToasts}

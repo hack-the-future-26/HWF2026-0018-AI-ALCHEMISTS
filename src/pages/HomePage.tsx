@@ -99,7 +99,9 @@ export function HomePage({
   ];
 
   const upcomingSession = sessions.find(
-    (session) => session.status === "requested" || session.status === "confirmed"
+    (session) =>
+      (session.status === "requested" || session.status === "confirmed") &&
+      new Date(session.scheduledFor).getTime() >= now.getTime()
   );
 
   const groupsLabel = countLabel(groupPostsThisWeek, postsCapped);
@@ -137,7 +139,6 @@ export function HomePage({
           </label>
           <button className="select-button" type="button" onClick={() => onNavigate("search")}>
             Find people
-            <CaretDown size={14} />
           </button>
         </div>
       </section>
