@@ -8,7 +8,12 @@ import { ProfilePrompt } from "./components/layout/ProfilePrompt";
 import { RightPanel } from "./components/layout/RightPanel";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
+import { BackToTopButton } from "./components/ui/BackToTopButton";
+import { ConfirmDialog } from "./components/ui/ConfirmDialog";
+import { ScheduleSessionModal } from "./components/layout/ScheduleSessionModal";
+import type { ScheduleSessionInput } from "./components/composers/ScheduleSessionForm";
 import { MessageToastStack, type MessageToastData } from "./components/ui/MessageToast";
+import { SessionReminderToastStack, type SessionReminderToastData } from "./components/ui/SessionReminderToast";
 import { navigation } from "./constants/navigation";
 import { placeholderOwner } from "./lib/appStorage";
 import { fetchGithubImportData } from "./lib/github";
@@ -19,7 +24,10 @@ import {
   type Peer,
   type PostRow,
   type SessionRow,
-  completeSessionRow,
+  setSessionStatus,
+  subscribeToSessions,
+  clearConversationForMe,
+  deletePostRow,
   createCollaborationRow,
   createPostRow,
   deleteAccount,
@@ -36,6 +44,7 @@ import {
   markConversationRead,
   markMessageNotificationsRead,
   mergeGithubOfferedSkills,
+  requestSessionRow,
   saveGithubProfileData,
   sendMessageRow,
   subscribeToMessages,
@@ -64,6 +73,8 @@ import type {
   Screen,
   ThemePreference
 } from "./types/app";
+
+const SESSION_REMINDER_KEY = "peerspace-session-reminders";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -110,16 +121,39 @@ function App() {
   const [peersDirectory, setPeersDirectory] = useState<Peer[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [composerDraft, setComposerDraft] = useState("");
+  // Keyed by conversation id so each DM keeps its own unsent draft.
+  const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
+  const setComposerDraft = useCallback((conversationId: string, value: string) => {
+    setComposerDrafts((prev) => ({ ...prev, [conversationId]: value }));
+  }, []);
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [messageToasts, setMessageToasts] = useState<MessageToastData[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: "post"; post: PostRow } | { kind: "conversation"; conversation: Conversation } | null
+  >(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [schedulingPeer, setSchedulingPeer] = useState<Peer | null>(null);
+  const [isSchedulingSession, setIsSchedulingSession] = useState(false);
+  const [sessionReminderToasts, setSessionReminderToasts] = useState<SessionReminderToastData[]>([]);
 
   const selectedConversationIdRef = useRef<string | null>(null);
   const activeScreenRef = useRef<Screen>("home");
   const conversationsRef = useRef<Conversation[]>([]);
   const shownToastIds = useRef<Set<string>>(new Set());
   const locallyReadIds = useRef<Set<string>>(new Set());
+  // Persisted so a reload inside the reminder window doesn't re-alert.
+  const shownSessionReminderIds = useRef<Set<string>>(
+    new Set(
+      (() => {
+        try {
+          return JSON.parse(window.localStorage.getItem(SESSION_REMINDER_KEY) ?? "[]") as string[];
+        } catch {
+          return [];
+        }
+      })()
+    )
+  );
 
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId;
@@ -238,7 +272,7 @@ function App() {
       setPeersDirectory([]);
       setConversations([]);
       setSelectedConversationId(null);
-      setComposerDraft("");
+      setComposerDrafts({});
       setActiveScreen("home");
       return;
     }
@@ -400,6 +434,14 @@ function App() {
         const toastId = `${message.id}-toast`;
         const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
 
+        // Not in local state means this user cleared the chat, so refetch to
+        // bring it back with just the messages sent since the cutoff.
+        if (!currentConversations.some((c) => c.id === message.conversationId)) {
+          fetchConversations(userId)
+            .then(setConversations)
+            .catch(() => {});
+        }
+
         setConversations((prev) => {
           const index = prev.findIndex((c) => c.id === message.conversationId);
           if (index === -1) return prev;
@@ -493,10 +535,19 @@ function App() {
       )
       .subscribe();
 
+    // Without this a session someone books with you (or confirms) stays
+    // invisible until a reload, so its reminder never fires either.
+    const sessionChannel = subscribeToSessions(userId, () => {
+      fetchSessions(userId)
+        .then(setSessionRows)
+        .catch(() => {});
+    });
+
     return () => {
       if (messageChannel) client.removeChannel(messageChannel);
       client.removeChannel(conversationChannelA);
       client.removeChannel(conversationChannelB);
+      if (sessionChannel) client.removeChannel(sessionChannel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
@@ -615,10 +666,32 @@ function App() {
     );
   }
 
+  async function handleConfirmSession(session: SessionRow) {
+    try {
+      await setSessionStatus(session.id, "confirmed");
+      setSessionRows((prev) =>
+        prev.map((row) => (row.id === session.id ? { ...row, status: "confirmed" } : row))
+      );
+    } catch {
+      setActionError("Couldn't confirm that session. Please try again.");
+    }
+  }
+
+  async function handleDeclineSession(session: SessionRow) {
+    try {
+      await setSessionStatus(session.id, "cancelled");
+      setSessionRows((prev) =>
+        prev.map((row) => (row.id === session.id ? { ...row, status: "cancelled" } : row))
+      );
+    } catch {
+      setActionError("Couldn't decline that session. Please try again.");
+    }
+  }
+
   async function handleCompleteSession(session: SessionRow) {
     if (!profile) return;
     try {
-      await completeSessionRow(session.id);
+      await setSessionStatus(session.id, "completed");
       setSessionRows((prev) =>
         prev.map((row) => (row.id === session.id ? { ...row, status: "completed" } : row))
       );
@@ -642,10 +715,25 @@ function App() {
   }
 
   function handleScheduleSessionRequest(peer: Peer) {
-    void openConversationWith(
-      peer,
-      `Hi ${peer.name}, could we set up a time to pair on a session? `
-    );
+    setSchedulingPeer(peer);
+  }
+
+  async function handleSubmitSessionRequest(input: ScheduleSessionInput) {
+    if (!schedulingPeer) return;
+    setIsSchedulingSession(true);
+    try {
+      const session = await requestSessionRow(schedulingPeer.id, schedulingPeer, input);
+      setSessionRows((prev) =>
+        [...prev, session].sort(
+          (a, b) => new Date(a.scheduledFor).getTime() - new Date(b.scheduledFor).getTime()
+        )
+      );
+      setSchedulingPeer(null);
+    } catch {
+      setActionError(`Couldn't schedule a session with ${schedulingPeer.name}. Please try again.`);
+    } finally {
+      setIsSchedulingSession(false);
+    }
   }
 
   async function handleCreateCollaboration(input: NewCollaborationInput) {
@@ -668,10 +756,19 @@ function App() {
       setConversations((prev) =>
         prev.some((conversation) => conversation.id === conversationId)
           ? prev
-          : [...prev, { id: conversationId, peer, unread: 0, messages: [] }]
+          : [
+              ...prev,
+              {
+                id: conversationId,
+                peer,
+                unread: 0,
+                messages: [],
+                createdAt: new Date().toISOString()
+              }
+            ]
       );
       setSendError(null);
-      setComposerDraft(draftText);
+      if (draftText) setComposerDraft(conversationId, draftText);
       setSelectedConversationId(conversationId);
       setActiveScreen("messages");
     } catch {
@@ -704,28 +801,124 @@ function App() {
     }
   }, [conversations]);
 
-  async function handleSendMessage(body: string) {
+  const handleDismissSessionReminder = useCallback((toastId: string) => {
+    setSessionReminderToasts((prev) => prev.filter((t) => t.id !== toastId));
+  }, []);
+
+  const handleOpenSessionReminder = useCallback(() => {
+    setActiveScreen("sessions");
+  }, []);
+
+  useEffect(() => {
+    const REMINDER_WINDOW_MS = 10 * 60 * 1000;
+    const upcoming = sessionRows.filter((row) => {
+      if (row.status !== "requested" && row.status !== "confirmed") return false;
+      if (shownSessionReminderIds.current.has(row.id)) return false;
+      const msUntil = new Date(row.scheduledFor).getTime() - now.getTime();
+      return msUntil >= 0 && msUntil <= REMINDER_WINDOW_MS;
+    });
+    if (upcoming.length === 0) return;
+
+    upcoming.forEach((session) => shownSessionReminderIds.current.add(session.id));
+    try {
+      window.localStorage.setItem(
+        SESSION_REMINDER_KEY,
+        JSON.stringify([...shownSessionReminderIds.current])
+      );
+    } catch {
+      // a full or unavailable localStorage shouldn't block the reminder itself
+    }
+
+    setSessionReminderToasts((prev) => [
+      ...prev,
+      ...upcoming.map((session) => ({
+        id: session.id,
+        peer: session.peer,
+        topic: session.topic,
+        minutesUntil: Math.max(
+          0,
+          Math.round((new Date(session.scheduledFor).getTime() - now.getTime()) / 60000)
+        )
+      }))
+    ]);
+
+    if (typeof window !== "undefined" && "Notification" in window) {
+      const notify = () => {
+        upcoming.forEach((session) => {
+          const minutesUntil = Math.max(
+            0,
+            Math.round((new Date(session.scheduledFor).getTime() - now.getTime()) / 60000)
+          );
+          new Notification(`Session with ${session.peer.name}`, {
+            body: `${session.topic} — starts in ${minutesUntil} min`
+          });
+        });
+      };
+      if (Notification.permission === "granted") {
+        notify();
+      } else if (Notification.permission === "default") {
+        void Notification.requestPermission().then((permission) => {
+          if (permission === "granted") notify();
+        });
+      }
+    }
+  }, [now, sessionRows]);
+
+  // The conversation id comes from whichever chat is actually on screen, which
+  // isn't always selectedConversationId - MessagesPage falls back to the most
+  // recent conversation when nothing has been clicked yet.
+  async function handleSendMessage(conversationId: string, body: string) {
     const trimmed = body.trim();
-    if (!trimmed || !profile || !selectedConversationId) return;
-    setComposerDraft("");
+    if (!trimmed || !profile) return;
+    setComposerDraft(conversationId, "");
     setSendError(null);
     try {
-      const message = await sendMessageRow(selectedConversationId, profile.id, trimmed);
+      const message = await sendMessageRow(conversationId, profile.id, trimmed);
       if (!message) return;
       setConversations((prev) =>
         prev.map((conversation) =>
-          conversation.id !== selectedConversationId || conversation.messages.some((item) => item.id === message.id)
+          conversation.id !== conversationId || conversation.messages.some((item) => item.id === message.id)
             ? conversation
             : { ...conversation, messages: [...conversation.messages, message] }
         )
       );
     } catch {
-      setComposerDraft(trimmed);
+      setComposerDraft(conversationId, trimmed);
       setSendError("Message didn't send. Please try again.");
     }
   }
 
   const handleDismissSendError = useCallback(() => setSendError(null), []);
+
+  async function handleConfirmDelete() {
+    if (!pendingDelete || !profile) return;
+    setIsDeleting(true);
+    try {
+      if (pendingDelete.kind === "post") {
+        await deletePostRow(pendingDelete.post.id);
+        setPosts((prev) => prev.filter((post) => post.id !== pendingDelete.post.id));
+      } else {
+        const { id } = pendingDelete.conversation;
+        await clearConversationForMe(id, profile.id);
+        setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
+        setComposerDrafts((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        if (selectedConversationId === id) setSelectedConversationId(null);
+      }
+      setPendingDelete(null);
+    } catch {
+      setActionError(
+        pendingDelete.kind === "post"
+          ? "Couldn't delete that post. Please try again."
+          : "Couldn't delete that chat. Please try again."
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }
 
   if (!hasSupabaseConfig || !supabase) {
     return (
@@ -820,6 +1013,28 @@ function App() {
             }}
           />
         )}
+        {pendingDelete && (
+          <ConfirmDialog
+            title={pendingDelete.kind === "post" ? "Delete this post?" : "Delete this chat?"}
+            body={
+              pendingDelete.kind === "post"
+                ? "This removes the post for everyone on the feed. It can't be undone."
+                : `This clears the chat with ${pendingDelete.conversation.peer.name} for you only — they keep their copy. It reappears if they message you again.`
+            }
+            confirmLabel={pendingDelete.kind === "post" ? "Delete post" : "Delete chat"}
+            isBusy={isDeleting}
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setPendingDelete(null)}
+          />
+        )}
+        {schedulingPeer && (
+          <ScheduleSessionModal
+            peer={schedulingPeer}
+            isSubmitting={isSchedulingSession}
+            onSubmit={handleSubmitSessionRequest}
+            onCancel={() => setSchedulingPeer(null)}
+          />
+        )}
         <div className="content-shell">
           <main className="center-column" id="main-content">
             {activeScreen === "home" && (
@@ -833,7 +1048,7 @@ function App() {
                 onNavigate={setActiveScreen}
                 onCreatePost={handleCreatePost}
                 onRespondToPost={handleRespondToPost}
-                onOpenSessionConversation={handleOpenSessionConversation}
+                onDeletePost={(post) => setPendingDelete({ kind: "post", post })}
               />
             )}
             {activeScreen === "search" && (
@@ -859,19 +1074,25 @@ function App() {
                 currentUserId={profile.id}
                 conversations={conversations}
                 selectedConversationId={selectedConversationId}
-                draft={composerDraft}
+                drafts={composerDrafts}
                 error={sendError}
                 onSelectConversation={setSelectedConversationId}
                 onDraftChange={setComposerDraft}
                 onSendMessage={handleSendMessage}
+                onDeleteConversation={(conversation) =>
+                  setPendingDelete({ kind: "conversation", conversation })
+                }
                 onDismissError={handleDismissSendError}
               />
             )}
             {activeScreen === "sessions" && (
               <SessionsPage
                 sessions={sessionRows}
+                currentUserId={profile.id}
                 onOpenConversation={handleOpenSessionConversation}
                 onCompleteSession={handleCompleteSession}
+                onConfirmSession={handleConfirmSession}
+                onDeclineSession={handleDeclineSession}
                 onNavigate={setActiveScreen}
               />
             )}
@@ -914,21 +1135,29 @@ function App() {
         onNavigate={setActiveScreen}
         onLogout={handleLogout}
       />
-      <MessageToastStack
-        toasts={messageToasts}
-        onDismiss={handleDismissToast}
-        onOpen={handleOpenToastConversation}
-      />
-      {actionError && (
-        <div className="message-toast-stack" aria-live="assertive">
-          <div className="message-composer-error action-error-toast" role="alert">
-            <span>{actionError}</span>
-            <button type="button" onClick={() => setActionError(null)}>
-              Dismiss
-            </button>
+      <BackToTopButton />
+      <div className="toast-layer">
+        <SessionReminderToastStack
+          toasts={sessionReminderToasts}
+          onDismiss={handleDismissSessionReminder}
+          onOpen={handleOpenSessionReminder}
+        />
+        <MessageToastStack
+          toasts={messageToasts}
+          onDismiss={handleDismissToast}
+          onOpen={handleOpenToastConversation}
+        />
+        {actionError && (
+          <div className="message-toast-stack" aria-live="assertive">
+            <div className="message-composer-error action-error-toast" role="alert">
+              <span>{actionError}</span>
+              <button type="button" onClick={() => setActionError(null)}>
+                Dismiss
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

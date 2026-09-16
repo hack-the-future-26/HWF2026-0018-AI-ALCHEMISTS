@@ -59,6 +59,7 @@ export type Conversation = {
   peer: Peer;
   unread: number;
   messages: Message[];
+  createdAt: string;
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -356,21 +357,45 @@ export async function fetchConversations(userId: string): Promise<Conversation[]
       : { data: [], error: null };
   if (messagesResult.error) throw messagesResult.error;
 
-  return conversationRows.map((row: any) => {
-    const peerId = row.peer_a === userId ? row.peer_b : row.peer_a;
-    const peer = peersById.get(peerId) ?? placeholderPeer(peerId);
-    const rowsForConversation = (messagesResult.data ?? []).filter(
-      (message: any) => message.conversation_id === row.id
-    );
-    return {
-      id: row.id,
-      peer,
-      unread: rowsForConversation.filter(
-        (message: any) => message.sender_id !== userId && !message.read_at
-      ).length,
-      messages: rowsForConversation.map(mapMessageRow)
-    };
-  });
+  const clearsResult =
+    conversationIds.length > 0
+      ? await client
+          .from("conversation_clears")
+          .select("conversation_id, cleared_at")
+          .eq("user_id", userId)
+          .in("conversation_id", conversationIds)
+      : { data: [], error: null };
+  if (clearsResult.error) throw clearsResult.error;
+  const clearedAtByConversation = new Map<string, number>(
+    (clearsResult.data ?? []).map((row: any) => [
+      row.conversation_id as string,
+      new Date(row.cleared_at).getTime()
+    ])
+  );
+
+  return conversationRows
+    .map((row: any) => {
+      const peerId = row.peer_a === userId ? row.peer_b : row.peer_a;
+      const peer = peersById.get(peerId) ?? placeholderPeer(peerId);
+      const clearedAt = clearedAtByConversation.get(row.id);
+      const rowsForConversation = (messagesResult.data ?? []).filter(
+        (message: any) =>
+          message.conversation_id === row.id &&
+          (clearedAt === undefined || new Date(message.created_at).getTime() > clearedAt)
+      );
+      // A cleared chat stays hidden until the peer sends something new.
+      if (clearedAt !== undefined && rowsForConversation.length === 0) return null;
+      return {
+        id: row.id,
+        peer,
+        unread: rowsForConversation.filter(
+          (message: any) => message.sender_id !== userId && !message.read_at
+        ).length,
+        messages: rowsForConversation.map(mapMessageRow),
+        createdAt: row.created_at
+      };
+    })
+    .filter((conversation: Conversation | null): conversation is Conversation => conversation !== null);
 }
 
 export async function findOrCreateConversation(userId: string, peerId: string): Promise<string> {
@@ -529,6 +554,7 @@ export type SessionRow = {
   status: SessionStatus;
   notes: string;
   peer: Peer;
+  requesterId: string;
 };
 
 export async function fetchSessions(userId: string): Promise<SessionRow[]> {
@@ -561,14 +587,65 @@ export async function fetchSessions(userId: string): Promise<SessionRow[]> {
       scheduledFor: row.scheduled_for,
       status: row.status,
       notes: row.notes ?? "",
-      peer: peersById.get(peerId) ?? placeholderPeer(peerId)
+      peer: peersById.get(peerId) ?? placeholderPeer(peerId),
+      requesterId: row.requester_id
     };
   });
 }
 
-export async function completeSessionRow(sessionId: string) {
+export function subscribeToSessions(userId: string, onChange: () => void): RealtimeChannel | null {
+  if (!supabase) return null;
+  return supabase
+    .channel(`peerspace-sessions-${Math.random().toString(36).slice(2)}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "sessions", filter: `requester_id=eq.${userId}` },
+      onChange
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "sessions", filter: `peer_id=eq.${userId}` },
+      onChange
+    )
+    .subscribe();
+}
+
+// Inserts directly rather than via POST /api/sessions/request: the Express API
+// in server/ only runs locally, so anything routed through it is dead in the
+// deployed build. The "verified users can request sessions" RLS policy covers
+// this insert.
+export async function requestSessionRow(
+  peerId: string,
+  peer: Peer,
+  input: { topic: string; scheduledFor: string; notes?: string }
+): Promise<SessionRow> {
   const client = requireClient();
-  const { error } = await client.from("sessions").update({ status: "completed" }).eq("id", sessionId);
+  const { data: session, error } = await client
+    .from("sessions")
+    .insert({
+      peer_id: peerId,
+      topic: input.topic,
+      scheduled_for: input.scheduledFor,
+      notes: input.notes ?? "",
+      status: "requested"
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return {
+    id: session.id,
+    topic: session.topic,
+    scheduledFor: session.scheduled_for,
+    status: session.status,
+    notes: session.notes ?? "",
+    peer,
+    requesterId: session.requester_id
+  };
+}
+
+export async function setSessionStatus(sessionId: string, status: SessionStatus) {
+  const client = requireClient();
+  const { error } = await client.from("sessions").update({ status }).eq("id", sessionId);
   if (error) throw error;
 }
 
@@ -676,6 +753,24 @@ export async function createPostRow(
     .single();
   if (error) throw error;
   return mapPostRow(data);
+}
+
+export async function deletePostRow(postId: string) {
+  const client = requireClient();
+  const { error } = await client.from("posts").delete().eq("id", postId);
+  if (error) throw error;
+}
+
+// "Delete chat" only for this user: the shared conversation row stays so the
+// other person keeps their history. fetchConversations hides everything at or
+// before the cutoff, and the chat comes back if a newer message arrives.
+export async function clearConversationForMe(conversationId: string, userId: string) {
+  const client = requireClient();
+  const { error } = await client.from("conversation_clears").upsert(
+    { conversation_id: conversationId, user_id: userId, cleared_at: new Date().toISOString() },
+    { onConflict: "conversation_id,user_id" }
+  );
+  if (error) throw error;
 }
 
 export function subscribeToPosts(onInsert: (postId: string) => void): RealtimeChannel | null {

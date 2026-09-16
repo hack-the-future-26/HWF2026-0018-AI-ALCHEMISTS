@@ -6,13 +6,19 @@ import type { Screen } from "../types/app";
 
 export function SessionsPage({
   sessions,
+  currentUserId,
   onOpenConversation,
   onCompleteSession,
+  onConfirmSession,
+  onDeclineSession,
   onNavigate
 }: {
   sessions: SessionRow[];
+  currentUserId: string;
   onOpenConversation: (session: SessionRow) => void;
   onCompleteSession: (session: SessionRow) => void;
+  onConfirmSession: (session: SessionRow) => void;
+  onDeclineSession: (session: SessionRow) => void;
   onNavigate: (screen: Screen) => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -60,6 +66,27 @@ export function SessionsPage({
                       >
                         Message {session.peer.name}
                       </button>
+                      {session.status === "requested" &&
+                        (session.requesterId === currentUserId ? (
+                          <span className="profile-meta">
+                            Waiting for {session.peer.name} to confirm.
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => onConfirmSession(session)}
+                            >
+                              Accept
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => onDeclineSession(session)}
+                            >
+                              Decline
+                            </button>
+                          </>
+                        ))}
                       {session.status === "confirmed" && (
                         <button
                           className="btn btn-secondary"

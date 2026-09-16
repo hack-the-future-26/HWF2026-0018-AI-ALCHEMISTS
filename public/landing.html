@@ -1,3 +1,6 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PeerSpace</title>
 <link rel="icon" type="image/jpeg" href="/peerspace-logo.jpeg">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&display=swap">
@@ -82,6 +85,70 @@ nav {
 .mobile-menu {
   display: none; background: none; border: none;
   color: var(--fg); cursor: pointer; padding: 4px;
+}
+/* Hamburger morphs into an X. transform-box:fill-box makes each line rotate
+   about its own centre rather than the SVG origin. */
+.mobile-menu svg line {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease;
+}
+.mobile-menu[aria-expanded="true"] svg line:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.mobile-menu[aria-expanded="true"] svg line:nth-child(2) { opacity: 0; transform: scaleX(0.4); }
+.mobile-menu[aria-expanded="true"] svg line:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* Dropdown panel. Animated with opacity/transform + visibility, because
+   `display` can't be transitioned. */
+.mob-nav {
+  position: absolute;
+  top: 60px; left: 0; right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  z-index: 99;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px);
+  transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.28s;
+}
+.mob-nav.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.mob-nav a {
+  text-decoration: none;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s;
+}
+/* .btn-dark keeps its own colour and size - it's light text on a dark fill. */
+.mob-nav a:not(.btn-dark) {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.mob-nav a.btn-dark { justify-content: center; text-align: center; }
+.mob-nav.is-open a { opacity: 1; transform: translateY(0); }
+.mob-nav.is-open a:nth-child(1) { transition-delay: 0.05s; }
+.mob-nav.is-open a:nth-child(2) { transition-delay: 0.10s; }
+.mob-nav.is-open a:nth-child(3) { transition-delay: 0.15s; }
+.mob-nav.is-open a:nth-child(4) { transition-delay: 0.20s; }
+
+/* The toggle only exists below 600px; this stops an open panel lingering if
+   the viewport is widened while it's showing. */
+@media (min-width: 601px) {
+  .mob-nav { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mob-nav,
+  .mob-nav a,
+  .mobile-menu svg line { transition: none; }
+  .mob-nav.is-open a { transition-delay: 0s; }
 }
 
 /* HERO */
@@ -524,10 +591,18 @@ footer a:hover { color: var(--fg); }
 @media (max-width: 600px) {
   .nav-links { display: none; }
   .mobile-menu { display: block; }
-  .bento { grid-template-columns: 1fr; }
+  /* minmax(0,1fr), not 1fr: a grid track defaults to min-width:auto, so a long
+     label inside a nested mock card widens the track past the viewport. */
+  .bento { grid-template-columns: minmax(0, 1fr); }
   .bento-card.wide { grid-column: span 1; }
-  .testi-grid { grid-template-columns: 1fr; }
-  .section { padding: 56px 20px; }
+  .testi-grid { grid-template-columns: minmax(0, 1fr); }
+  .hiw-grid, .gami-grid { grid-template-columns: minmax(0, 1fr); }
+  .section { padding: 56px 16px; }
+  .bento-card { padding: 20px; }
+  .showcase-inner { padding: 0 16px; }
+  /* Same reason, for the flex rows inside the preview mocks. */
+  .bento-card, .bento-preview, .mock-match-card, .mock-learn-row { min-width: 0; }
+  .mock-match-header > * { min-width: 0; }
 }
 
     /* ── Smooth scroll ── */
@@ -744,14 +819,14 @@ footer a:hover { color: var(--fg); }
       <a href="#rewards">Rewards</a>
       <a href="/login" class="btn-dark">Get started</a>
     </div>
-    <button class="mobile-menu" aria-label="Menu" onclick="var m=document.getElementById('mob-nav');m.style.display=m.style.display==='flex'?'none':'flex'">
+    <button class="mobile-menu" id="mob-toggle" aria-label="Menu" aria-expanded="false" aria-controls="mob-nav">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
     </button>
-    <div id="mob-nav" style="display:none;position:absolute;top:60px;left:0;right:0;background:var(--bg);border-bottom:1px solid var(--border);padding:16px 24px;flex-direction:column;gap:16px;z-index:99;">
-      <a href="#features" style="font-size:15px;color:var(--fg);text-decoration:none;font-weight:500;">Features</a>
-      <a href="#how" style="font-size:15px;color:var(--fg);text-decoration:none;font-weight:500;">How it works</a>
-      <a href="#rewards" style="font-size:15px;color:var(--fg);text-decoration:none;font-weight:500;">Rewards</a>
-      <a href="/login" class="btn-dark" style="text-align:center;">Get started</a>
+    <div id="mob-nav" class="mob-nav">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#rewards">Rewards</a>
+      <a href="/login" class="btn-dark">Get started</a>
     </div>
   </div>
 </nav>
@@ -1208,6 +1283,36 @@ footer a:hover { color: var(--fg); }
 
   document.querySelectorAll('.will-animate').forEach(function(el) {
     io.observe(el);
+  });
+})();
+
+// ── Mobile nav ───────────────────────────────────────────────────
+(function() {
+  var toggle = document.getElementById('mob-toggle');
+  var panel = document.getElementById('mob-nav');
+  if (!toggle || !panel) return;
+
+  function setOpen(open) {
+    panel.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  toggle.addEventListener('click', function(event) {
+    event.stopPropagation();
+    setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+  });
+
+  // Jumping to an anchor should close the menu behind you.
+  panel.addEventListener('click', function(event) {
+    if (event.target.closest('a')) setOpen(false);
+  });
+
+  document.addEventListener('click', function(event) {
+    if (!panel.contains(event.target) && !toggle.contains(event.target)) setOpen(false);
+  });
+
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') setOpen(false);
   });
 })();
 

@@ -19,15 +19,32 @@ import {
 } from "../lib/peerspace";
 import { BADGE_DEFINITIONS, type BadgeType, fetchBadges, levelLabel } from "../lib/rewards";
 
+// The skill fields stay raw text while editing. Parsing on every keystroke and
+// re-joining for display ate the comma as soon as it was typed, because
+// "React," split+filtered back down to "React".
 type ProfileFields = {
   name: string;
   department: string;
   year: string;
   building: string;
   bio: string;
-  skillsOffered: string[];
-  skillsWanted: string[];
+  skillsOffered: string;
+  skillsWanted: string;
 };
+
+function skillsOfType(peer: Peer, type: "knows" | "wants") {
+  return peer.skills
+    .filter((skill) => skill.type === type)
+    .map((skill) => skill.name)
+    .join(", ");
+}
+
+function parseSkills(value: string): string[] {
+  return value
+    .split(",")
+    .map((skill) => skill.trim())
+    .filter(Boolean);
+}
 
 function toProfileFields(peer: Peer): ProfileFields {
   return {
@@ -36,10 +53,47 @@ function toProfileFields(peer: Peer): ProfileFields {
     year: peer.year,
     building: peer.building,
     bio: peer.bio,
-    skillsOffered: peer.skills.filter((skill) => skill.type === "knows").map((skill) => skill.name),
-    skillsWanted: peer.skills.filter((skill) => skill.type === "wants").map((skill) => skill.name)
+    skillsOffered: skillsOfType(peer, "knows"),
+    skillsWanted: skillsOfType(peer, "wants")
   };
 }
+
+// Keeps whatever the user already had saved selectable, so switching these
+// fields to dropdowns can't silently rewrite an existing value.
+function withCurrent(options: readonly string[], current: string): string[] {
+  const trimmed = current.trim();
+  return trimmed && !options.some((option) => option.toLowerCase() === trimmed.toLowerCase())
+    ? [trimmed, ...options]
+    : [...options];
+}
+
+const MAJOR_OPTIONS = [
+  "Computer Science",
+  "Information Technology",
+  "Electronics",
+  "Electrical Engineering",
+  "Mechanical Engineering",
+  "Civil Engineering",
+  "Chemical Engineering",
+  "Biotechnology",
+  "Mathematics",
+  "Physics",
+  "Business",
+  "Economics",
+  "Design",
+  "Psychology",
+  "Other"
+] as const;
+
+const ACADEMIC_YEAR_OPTIONS = [
+  "First year",
+  "Second year",
+  "Third year",
+  "Fourth year",
+  "Final year",
+  "Graduate",
+  "Postgraduate"
+] as const;
 
 export function ProfilePage({
   profile,
@@ -148,7 +202,7 @@ export function ProfilePage({
         academicYear: draft.year,
         bio: draft.bio
       });
-      await syncSkills(profile.id, draft.skillsOffered, draft.skillsWanted);
+      await syncSkills(profile.id, parseSkills(draft.skillsOffered), parseSkills(draft.skillsWanted));
       saveRollNumber(profile.id, rollDraft);
       setRollNumber(rollDraft);
       const row = await fetchProfile(profile.id);
@@ -220,19 +274,33 @@ export function ProfilePage({
             </label>
             <label className="field">
               <span>Major</span>
-              <input
+              <select
                 value={draft.department}
                 onChange={(event) =>
                   setDraft((d) => ({ ...d, department: event.target.value }))
                 }
-              />
+              >
+                <option value="">Select a major</option>
+                {withCurrent(MAJOR_OPTIONS, profile.department).map((major) => (
+                  <option key={major} value={major}>
+                    {major}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span>Academic year</span>
-              <input
+              <select
                 value={draft.year}
                 onChange={(event) => setDraft((d) => ({ ...d, year: event.target.value }))}
-              />
+              >
+                <option value="">Select a year</option>
+                {withCurrent(ACADEMIC_YEAR_OPTIONS, profile.year).map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span>College</span>
@@ -262,30 +330,20 @@ export function ProfilePage({
             <label className="field">
               <span>Skills offered (comma separated)</span>
               <input
-                value={draft.skillsOffered.join(", ")}
+                value={draft.skillsOffered}
+                placeholder="HTML, JavaScript, TypeScript"
                 onChange={(event) =>
-                  setDraft((d) => ({
-                    ...d,
-                    skillsOffered: event.target.value
-                      .split(",")
-                      .map((skill) => skill.trim())
-                      .filter(Boolean)
-                  }))
+                  setDraft((d) => ({ ...d, skillsOffered: event.target.value }))
                 }
               />
             </label>
             <label className="field">
               <span>Wants to learn (comma separated)</span>
               <input
-                value={draft.skillsWanted.join(", ")}
+                value={draft.skillsWanted}
+                placeholder="React, Figma"
                 onChange={(event) =>
-                  setDraft((d) => ({
-                    ...d,
-                    skillsWanted: event.target.value
-                      .split(",")
-                      .map((skill) => skill.trim())
-                      .filter(Boolean)
-                  }))
+                  setDraft((d) => ({ ...d, skillsWanted: event.target.value }))
                 }
               />
             </label>

@@ -1,17 +1,20 @@
 import { postCta } from "../../constants/navigation";
 import { formatRelative, type PostRow } from "../../lib/peerspace";
 import { Avatar } from "../ui/Avatar";
+import { OverflowMenu } from "../ui/OverflowMenu";
 import { SkillTag } from "../ui/SkillTag";
 import { VerifiedBadge } from "../ui/VerifiedBadge";
 
 export function FeedCard({
   post,
   currentUserId,
-  onRespond
+  onRespond,
+  onDelete
 }: {
   post: PostRow;
   currentUserId: string;
   onRespond: (post: PostRow) => void;
+  onDelete: (post: PostRow) => void;
 }) {
   const isOwnPost = post.author.id === currentUserId;
 
@@ -27,6 +30,12 @@ export function FeedCard({
           </div>
           <span className="tag">{post.tag}</span>
         </div>
+        {isOwnPost && (
+          <OverflowMenu
+            label="Post options"
+            items={[{ label: "Delete post", onSelect: () => onDelete(post), danger: true }]}
+          />
+        )}
       </header>
       <p>{post.body}</p>
       <div className="tag-cloud">

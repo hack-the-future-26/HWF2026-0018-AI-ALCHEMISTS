@@ -11,6 +11,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "api": "tsx server/index.ts",
     "db:reset-seed": "tsx server/seed.ts",
+    "db:seed-demo": "tsx server/seed-demo.ts",
     "lint": "eslint ."
   },
   "dependencies": {

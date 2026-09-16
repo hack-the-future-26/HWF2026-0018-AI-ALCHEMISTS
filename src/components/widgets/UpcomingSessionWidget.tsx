@@ -12,8 +12,12 @@ export function UpcomingSessionWidget({
   onNavigate: (screen: Screen) => void;
   onOpenSessionConversation: (session: SessionRow) => void;
 }) {
+  // Sessions arrive sorted by scheduled_for ascending, so without the time
+  // check the oldest one wins and a session from last week reads as "upcoming".
   const upcoming = sessions.find(
-    (session) => session.status === "requested" || session.status === "confirmed"
+    (session) =>
+      (session.status === "requested" || session.status === "confirmed") &&
+      new Date(session.scheduledFor).getTime() >= Date.now()
   );
 
   if (!upcoming) {

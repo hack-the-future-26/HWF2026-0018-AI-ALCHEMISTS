@@ -11,7 +11,7 @@ import { useState } from "react";
 import { FeedCard } from "../components/cards/FeedCard";
 import { PostComposer } from "../components/composers/PostComposer";
 import { SectionHeader } from "../components/ui/SectionHeader";
-import { UpcomingSessionWidget } from "../components/widgets/UpcomingSessionWidget";
+import { UpcomingSessionPill } from "../components/widgets/UpcomingSessionPill";
 import { feedTabs, postTimeFilters } from "../constants/navigation";
 import { greetingForHour } from "../lib/appStorage";
 import type { Peer, PostRow, SessionRow } from "../lib/peerspace";
@@ -50,7 +50,7 @@ export function HomePage({
   onNavigate,
   onCreatePost,
   onRespondToPost,
-  onOpenSessionConversation
+  onDeletePost
 }: {
   profile: Peer;
   posts: PostRow[];
@@ -61,9 +61,10 @@ export function HomePage({
   onNavigate: (screen: Screen) => void;
   onCreatePost: (input: NewPostInput) => void;
   onRespondToPost: (post: PostRow) => void;
-  onOpenSessionConversation: (session: SessionRow) => void;
+  onDeletePost: (post: PostRow) => void;
 }) {
   const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [isSessionPillHidden, setIsSessionPillHidden] = useState(false);
   const [activeTab, setActiveTab] = useState<(typeof feedTabs)[number]>("All Feed");
   const [feedQuery, setFeedQuery] = useState("");
   const [activeTimeFilter, setActiveTimeFilter] =
@@ -97,6 +98,12 @@ export function HomePage({
     { label: "Your skill matches", value: String(skillMatchCount), icon: CheckCircle }
   ];
 
+  const upcomingSession = sessions.find(
+    (session) =>
+      (session.status === "requested" || session.status === "confirmed") &&
+      new Date(session.scheduledFor).getTime() >= now.getTime()
+  );
+
   const groupsLabel = countLabel(groupPostsThisWeek, postsCapped);
   const weeklySummary =
     groupPostsThisWeek === 0
@@ -105,13 +112,15 @@ export function HomePage({
 
   return (
     <div className="page-stack">
-      <div className="home-mobile-session">
-        <UpcomingSessionWidget
-          sessions={sessions}
-          onNavigate={onNavigate}
-          onOpenSessionConversation={onOpenSessionConversation}
-        />
-      </div>
+      {upcomingSession && !isSessionPillHidden && (
+        <div className="home-mobile-session">
+          <UpcomingSessionPill
+            session={upcomingSession}
+            onOpen={() => onNavigate("sessions")}
+            onDismiss={() => setIsSessionPillHidden(true)}
+          />
+        </div>
+      )}
       <section className="home-hero">
         <div>
           <h1>
@@ -130,7 +139,6 @@ export function HomePage({
           </label>
           <button className="select-button" type="button" onClick={() => onNavigate("search")}>
             Find people
-            <CaretDown size={14} />
           </button>
         </div>
       </section>
@@ -149,7 +157,7 @@ export function HomePage({
         ))}
       </section>
 
-      <div className="section-row">
+      <div className="section-row home-feed-header">
         <SectionHeader label="What's happening on campus" />
         <button
           className="btn btn-secondary"
@@ -168,7 +176,7 @@ export function HomePage({
           onCancel={() => setIsComposerOpen(false)}
         />
       )}
-      <div className="section-row">
+      <div className="section-row feed-controls">
         <div className="tabs" role="tablist" aria-label="Campus feed filters">
           {feedTabs.map((tab) => (
             <button
@@ -179,6 +187,20 @@ export function HomePage({
               {tab}
             </button>
           ))}
+        </div>
+        <div className="select-button feed-tab-select">
+          <select
+            aria-label="Filter feed by type"
+            value={activeTab}
+            onChange={(event) => setActiveTab(event.target.value as (typeof feedTabs)[number])}
+          >
+            {feedTabs.map((tab) => (
+              <option key={tab} value={tab}>
+                {tab}
+              </option>
+            ))}
+          </select>
+          <CaretDown size={14} />
         </div>
         <div className="select-button">
           <select
@@ -196,6 +218,13 @@ export function HomePage({
           </select>
           <CaretDown size={14} />
         </div>
+        <button
+          className="btn btn-secondary feed-new-post"
+          onClick={() => setIsComposerOpen((open) => !open)}
+        >
+          <Plus size={14} weight="bold" />
+          {isComposerOpen ? "Close" : "New"}
+        </button>
       </div>
       <section className="feed-list">
         {visiblePosts.length === 0 && posts.length === 0 && (
@@ -210,6 +239,7 @@ export function HomePage({
             post={post}
             currentUserId={profile.id}
             onRespond={onRespondToPost}
+            onDelete={onDeletePost}
           />
         ))}
       </section>
