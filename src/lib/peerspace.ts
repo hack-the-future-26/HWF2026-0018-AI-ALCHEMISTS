@@ -357,6 +357,8 @@ export async function fetchConversations(userId: string): Promise<Conversation[]
       : { data: [], error: null };
   if (messagesResult.error) throw messagesResult.error;
 
+  // "Delete chat" cutoffs are an optional extra: if the table is missing or
+  // unreadable we show every message rather than failing the whole inbox.
   const clearsResult =
     conversationIds.length > 0
       ? await client
@@ -365,7 +367,9 @@ export async function fetchConversations(userId: string): Promise<Conversation[]
           .eq("user_id", userId)
           .in("conversation_id", conversationIds)
       : { data: [], error: null };
-  if (clearsResult.error) throw clearsResult.error;
+  if (clearsResult.error) {
+    console.warn("conversation_clears unavailable, showing full history", clearsResult.error);
+  }
   const clearedAtByConversation = new Map<string, number>(
     (clearsResult.data ?? []).map((row: any) => [
       row.conversation_id as string,

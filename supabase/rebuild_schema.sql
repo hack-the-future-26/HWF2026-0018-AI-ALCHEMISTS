@@ -10,6 +10,7 @@ drop table if exists
   public.campus_feed,
   public.reviews,
   public.sessions,
+  public.conversation_clears,
   public.messages,
   public.conversations,
   public.user_skills,
@@ -85,6 +86,16 @@ create table public.conversations (
 
 create unique index conversations_peer_pair_key
   on public.conversations (least(peer_a, peer_b), greatest(peer_a, peer_b));
+
+-- "Delete chat" is per-user: it records a cutoff rather than removing the
+-- shared conversation, so the other person keeps their history. The chat
+-- reappears for this user if a newer message arrives.
+create table public.conversation_clears (
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade default auth.uid(),
+  cleared_at timestamptz not null default now(),
+  primary key (conversation_id, user_id)
+);
 
 create table public.messages (
   id uuid primary key default gen_random_uuid(),
@@ -283,6 +294,7 @@ alter table public.users enable row level security;
 alter table public.skills enable row level security;
 alter table public.user_skills enable row level security;
 alter table public.conversations enable row level security;
+alter table public.conversation_clears enable row level security;
 alter table public.messages enable row level security;
 alter table public.sessions enable row level security;
 alter table public.reviews enable row level security;
@@ -334,6 +346,11 @@ with check (
   and auth.uid() in (peer_a, peer_b)
   and public.is_verified_college_user()
 );
+
+create policy "users manage own conversation clears"
+on public.conversation_clears for all
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
 
 create policy "conversation members can read messages"
 on public.messages for select
@@ -509,6 +526,10 @@ create policy "verified users can create posts"
 on public.posts for insert
 with check (author_id = auth.uid() and public.is_verified_college_user());
 
+create policy "authors can delete own posts"
+on public.posts for delete
+using (author_id = auth.uid() and public.is_verified_college_user());
+
 create policy "verified users can read badges"
 on public.badges for select
 using (public.is_verified_college_user());
@@ -517,12 +538,14 @@ create policy "users can insert own badges"
 on public.badges for insert
 with check (user_id = auth.uid() and public.is_verified_college_user());
 
+alter table public.conversations replica identity full;
 alter table public.messages replica identity full;
 alter table public.notifications replica identity full;
 alter table public.sessions replica identity full;
 alter table public.posts replica identity full;
 alter table public.collab_applications replica identity full;
 
+alter publication supabase_realtime add table public.conversations;
 alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.notifications;
 alter publication supabase_realtime add table public.sessions;
