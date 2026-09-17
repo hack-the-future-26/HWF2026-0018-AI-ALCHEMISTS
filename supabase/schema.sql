@@ -509,12 +509,14 @@ create policy "users can insert own badges"
 on public.badges for insert
 with check (user_id = auth.uid() and public.is_verified_college_user());
 
+alter table public.conversations replica identity full;
 alter table public.messages replica identity full;
 alter table public.notifications replica identity full;
 alter table public.sessions replica identity full;
 alter table public.posts replica identity full;
 alter table public.collab_applications replica identity full;
 
+alter publication supabase_realtime add table public.conversations;
 alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.notifications;
 alter publication supabase_realtime add table public.sessions;

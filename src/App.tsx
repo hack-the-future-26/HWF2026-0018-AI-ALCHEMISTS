@@ -16,6 +16,7 @@ import { MessageToastStack, type MessageToastData } from "./components/ui/Messag
 import { SessionReminderToastStack, type SessionReminderToastData } from "./components/ui/SessionReminderToast";
 import { navigation } from "./constants/navigation";
 import { placeholderOwner } from "./lib/appStorage";
+import { isScreenPath, pathForScreen, screenFromPath } from "./lib/routing";
 import { fetchGithubImportData } from "./lib/github";
 import {
   type CollaborationRow,
@@ -78,6 +79,9 @@ const SESSION_REMINDER_KEY = "peerspace-session-reminders";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
+  // Flips once Supabase has actually reported on the stored session, so a
+  // still-unknown session is never mistaken for a signed-out one.
+  const [sessionResolved, setSessionResolved] = useState(!hasSupabaseConfig);
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [profile, setProfile] = useState<Peer | null>(null);
   const [showProfilePrompt, setShowProfilePrompt] = useState(false);
@@ -86,7 +90,9 @@ function App() {
   const [openProfileInEditMode, setOpenProfileInEditMode] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const [activeScreen, setActiveScreen] = useState<Screen>("home");
+  const [activeScreen, setActiveScreen] = useState<Screen>(() =>
+    screenFromPath(window.location.pathname)
+  );
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
     try {
       const stored = window.localStorage.getItem("peerspace-theme");
@@ -138,7 +144,9 @@ function App() {
   const [sessionReminderToasts, setSessionReminderToasts] = useState<SessionReminderToastData[]>([]);
 
   const selectedConversationIdRef = useRef<string | null>(null);
-  const activeScreenRef = useRef<Screen>("home");
+  const activeScreenRef = useRef<Screen>(screenFromPath(window.location.pathname));
+  const profileRef = useRef<Peer | null>(null);
+  profileRef.current = profile;
   const conversationsRef = useRef<Conversation[]>([]);
   const shownToastIds = useRef<Set<string>>(new Set());
   const locallyReadIds = useRef<Set<string>>(new Set());
@@ -167,9 +175,46 @@ function App() {
   useEffect(() => {
     activeScreenRef.current = activeScreen;
   }, [activeScreen]);
+
+  // Keep the address bar on the screen being shown, so a reload (or a shared
+  // link) reopens it instead of dropping the user back on Home.
+  useEffect(() => {
+    if (authPhase !== "ready") return;
+    const path = pathForScreen(activeScreen);
+    if (window.location.pathname === path) return;
+    // Arriving from the "/login" OAuth callback isn't a navigation the user
+    // should be able to go "back" into, so replace that entry instead.
+    const method = isScreenPath(window.location.pathname) ? "pushState" : "replaceState";
+    window.history[method]({ screen: activeScreen }, "", `${path}${window.location.search}`);
+  }, [activeScreen, authPhase]);
+
+  useEffect(() => {
+    const handlePopState = () => setActiveScreen(screenFromPath(window.location.pathname));
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
+
+  // Single source of truth for reloading the inbox. Realtime can miss an
+  // event (dropped socket, a conversation created while this tab was asleep),
+  // so opening Messages and refocusing the tab both re-sync from the server.
+  const refreshConversations = useCallback(() => {
+    const userId = profileRef.current?.id;
+    if (!userId) return;
+    fetchConversations(userId)
+      .then((fresh) =>
+        setConversations(
+          fresh.map((conversation) =>
+            locallyReadIds.current.has(conversation.id) ? { ...conversation, unread: 0 } : conversation
+          )
+        )
+      )
+      .catch((error) => {
+        console.error("Could not refresh conversations", error);
+      });
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
@@ -251,17 +296,26 @@ function App() {
       setAuthPhase("signedOut");
       return;
     }
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setSessionResolved(true);
+    });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      setSessionResolved(true);
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
+    // Until getSession() has answered, session is null only because we haven't
+    // looked yet. Treating that as signed out bounced every reload back to the
+    // landing page, losing the screen the user was on.
+    if (!sessionResolved) return;
+
     if (!session) {
       setProfile(null);
-      setAuthPhase((prev) => (prev === "loading" ? "signedOut" : "signedOut"));
+      setAuthPhase("signedOut");
       setShowProfilePrompt(false);
       setGithubSkillsPrompt(null);
       githubImportedRef.current = null;
@@ -353,7 +407,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, sessionResolved]);
 
   useEffect(() => {
     if (authPhase !== "ready" || !profile) return;
@@ -369,7 +423,9 @@ function App() {
       .then((rows) => {
         if (!cancelled) setConversations(rows);
       })
-      .catch(() => {});
+      .catch((error) => {
+        console.error("Could not load conversations", error);
+      });
 
     fetchCollaborations()
       .then((rows) => {
@@ -434,12 +490,32 @@ function App() {
         const toastId = `${message.id}-toast`;
         const isOpenAndVisible = openConvId === message.conversationId && currentScreen === "messages";
 
-        // Not in local state means this user cleared the chat, so refetch to
-        // bring it back with just the messages sent since the cutoff.
-        if (!currentConversations.some((c) => c.id === message.conversationId)) {
+        // Not in local state means this is a brand-new chat someone just
+        // started with us, or one we cleared. Refetch to pull it in, then
+        // toast off the fresh copy so a first message still announces itself.
+        const isUnknownConversation = !currentConversations.some(
+          (c) => c.id === message.conversationId
+        );
+        if (isUnknownConversation) {
           fetchConversations(userId)
-            .then(setConversations)
-            .catch(() => {});
+            .then((fresh) => {
+              setConversations(
+                fresh.map((conversation) =>
+                  locallyReadIds.current.has(conversation.id)
+                    ? { ...conversation, unread: 0 }
+                    : conversation
+                )
+              );
+              if (isMine || isOpenAndVisible || shownToastIds.current.has(toastId)) return;
+              const conv = fresh.find((c) => c.id === message.conversationId);
+              if (!conv) return;
+              shownToastIds.current.add(toastId);
+              setMessageToasts((toasts) => [
+                ...toasts,
+                { id: toastId, sender: conv.peer, body: message.body }
+              ]);
+            })
+            .catch((error) => console.error("Could not load new conversation", error));
         }
 
         setConversations((prev) => {
@@ -505,17 +581,6 @@ function App() {
       }
     });
 
-    const refreshConversations = () => {
-      fetchConversations(userId)
-        .then((fresh) => {
-          const merged = fresh.map((conv) =>
-            locallyReadIds.current.has(conv.id) ? { ...conv, unread: 0 } : conv
-          );
-          setConversations(merged);
-        })
-        .catch(() => {});
-    };
-
     const instanceId = Math.random().toString(36).slice(2);
     const conversationChannelA = client
       .channel(`conversations-a-${userId}-${instanceId}`)
@@ -548,6 +613,30 @@ function App() {
       client.removeChannel(conversationChannelA);
       client.removeChannel(conversationChannelB);
       if (sessionChannel) client.removeChannel(sessionChannel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authPhase, profile?.id]);
+
+  // Opening Messages re-syncs the inbox, so a chat that started while this
+  // tab was in the background is already there when the user looks.
+  useEffect(() => {
+    if (authPhase !== "ready" || !profile) return;
+    if (activeScreen !== "messages") return;
+    refreshConversations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authPhase, profile?.id, activeScreen]);
+
+  useEffect(() => {
+    if (authPhase !== "ready" || !profile) return;
+    const onFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshConversations();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authPhase, profile?.id]);
